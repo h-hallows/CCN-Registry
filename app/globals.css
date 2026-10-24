@@ -1,0 +1,146 @@
+@import 'tailwindcss';
+
+/*
+ * One operator, long sessions, dense tables. The palette is low-chroma so the only
+ * saturated colour on a screen is a state that needs attention.
+ */
+@theme {
+  --color-ink: #16181d;
+  --color-ink-soft: #4a4f5a;
+  --color-ink-faint: #767c88;
+  --color-page: #f7f7f5;
+  --color-card: #ffffff;
+  --color-line: #e2e2dd;
+  --color-line-soft: #eeeeea;
+
+  --color-expired: #a4253a;
+  --color-critical: #b5531b;
+  --color-soon: #8a6b12;
+  --color-upcoming: #4a6a8a;
+  --color-ok: #2f6a4a;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+:root {
+  --ink: var(--color-ink);
+  --ink-soft: var(--color-ink-soft);
+  --ink-faint: var(--color-ink-faint);
+  --page: var(--color-page);
+  --card: var(--color-card);
+  --line: var(--color-line);
+  --line-soft: var(--color-line-soft);
+  --accent: #2b4a6f;
+  --accent-soft: #eaeff5;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --ink: #e8e8e4;
+    --ink-soft: #a7aab2;
+    --ink-faint: #7c808a;
+    --page: #15161a;
+    --card: #1c1e23;
+    --line: #2d3037;
+    --line-soft: #24262c;
+    --accent: #8fb3d9;
+    --accent-soft: #232b35;
+    color-scheme: dark;
+
+    --color-expired: #e8798c;
+    --color-critical: #e39a63;
+    --color-soon: #cdb45f;
+    --color-upcoming: #8fb3d9;
+    --color-ok: #78c49c;
+  }
+}
+
+:root[data-theme='dark'] {
+  --ink: #e8e8e4;
+  --ink-soft: #a7aab2;
+  --ink-faint: #7c808a;
+  --page: #15161a;
+  --card: #1c1e23;
+  --line: #2d3037;
+  --line-soft: #24262c;
+  --accent: #8fb3d9;
+  --accent-soft: #232b35;
+  color-scheme: dark;
+}
+
+body {
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; }
+
+/* Tabular figures everywhere a date or a count is compared down a column. */
+.nums { font-variant-numeric: tabular-nums; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.hair { border-color: var(--line); }
+.hair-soft { border-color: var(--line-soft); }
+
+.btn {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 0.3rem 0.7rem; font-size: 0.8125rem; font-weight: 500;
+  background: var(--card); color: var(--ink);
+  cursor: pointer; white-space: nowrap;
+}
+.btn:hover { border-color: var(--ink-faint); }
+.btn-primary {
+  background: var(--accent); border-color: var(--accent);
+  color: var(--page);
+}
+.btn-primary:hover { opacity: 0.9; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.input, .select, .textarea {
+  width: 100%;
+  background: var(--card); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 0.35rem 0.5rem; font-size: 0.8125rem;
+  font-family: inherit;
+}
+.input:focus, .select:focus, .textarea:focus {
+  outline: 2px solid var(--accent); outline-offset: -1px;
+}
+
+.label {
+  display: block; font-size: 0.6875rem; font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--ink-faint); margin-bottom: 0.25rem;
+}
+
+table { border-collapse: collapse; width: 100%; }
+th {
+  text-align: left; font-size: 0.6875rem; font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--ink-faint); padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+td {
+  padding: 0.5rem 0.6rem; font-size: 0.8125rem;
+  border-bottom: 1px solid var(--line-soft); vertical-align: top;
+}
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: color-mix(in oklab, var(--accent-soft) 60%, transparent); }
+
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 1rem; }
+
+@media (max-width: 640px) {
+  .wrap { padding: 0 1rem; }
+  .scroller { overflow-x: auto; }
+}

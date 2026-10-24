@@ -1,0 +1,45 @@
+{
+  "name": "ccn-registry-os",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CCN Registry OS — internal operations tool for a California nurses' registry. Single operator, no public surface.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint:copy": "node scripts/copy-lint.mjs",
+    "db:migrate": "tsx lib/db/migrate.ts",
+    "db:reset": "tsx lib/db/migrate.ts --reset",
+    "db:seed": "tsx lib/db/seed.ts",
+    "db:up": "docker compose up -d && node scripts/wait-for-pg.mjs",
+    "db:down": "docker compose down",
+    "ci": "npm run lint:copy && npm run typecheck && npm run test"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.36.4",
+    "next": "^15.1.6",
+    "pg": "^8.13.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.2.17",
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/node": "^22.10.6",
+    "@types/pg": "^8.11.10",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "tailwindcss": "^4.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20.11"
+  }
+}
