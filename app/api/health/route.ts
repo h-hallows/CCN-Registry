@@ -10,9 +10,11 @@
  * It is therefore deliberately thin. Driver, reachability, and which migrations are
  * applied. No connection string, no credentials, no record counts, nothing about any
  * household or provider.
+ *
+ * Nothing in here may throw. A health route that 500s tells you only that something is
+ * wrong, which is what you already knew.
  */
 import { getDb } from '@/lib/db/client';
-import { migrationFiles } from '@/lib/db/migrate';
 import { ConfigError } from '@/lib/env';
 
 export const dynamic = 'force-dynamic';
@@ -21,37 +23,61 @@ interface Health {
   ok: boolean;
   database: 'ok' | 'unreachable' | 'not_configured';
   driver?: 'postgres' | 'pglite';
-  schema?: 'applied' | 'pending' | 'absent';
+  schema?: 'applied' | 'pending' | 'absent' | 'unknown';
+  appliedMigrations?: string[];
   pendingMigrations?: string[];
   detail?: string;
 }
 
+/**
+ * The migration filenames this build expects, or null when they cannot be read.
+ * They are loaded through a readdir rather than an import, so a bundler that traces
+ * imports will omit them unless next.config.ts says otherwise.
+ */
+async function expectedMigrations(): Promise<string[] | null> {
+  try {
+    const { migrationFiles } = await import('@/lib/db/migrate');
+    return migrationFiles().map((m) => m.name);
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(): Promise<Response> {
-  const expected = migrationFiles().map((m) => m.name);
   let body: Health;
 
   try {
     const handle = await getDb();
-    const rows = await handle.query<{ name: string }>(
-      `SELECT name FROM _migrations ORDER BY name`,
-    ).catch(() => null);
+    const applied = await handle
+      .query<{ name: string }>(`SELECT name FROM _migrations ORDER BY name`)
+      .then((rows) => rows.map((r) => r.name))
+      .catch(() => null);
 
-    if (rows === null) {
+    if (applied === null) {
       body = {
-        ok: false, database: 'ok', driver: handle.driver, schema: 'absent',
-        pendingMigrations: expected,
+        ok: false,
+        database: 'ok',
+        driver: handle.driver,
+        schema: 'absent',
         detail: 'Connected, but no schema has been applied. Run: npm run db:deploy',
       };
     } else {
-      const applied = new Set(rows.map((r) => r.name));
-      const pending = expected.filter((name) => !applied.has(name));
+      const expected = await expectedMigrations();
+      const pending = expected?.filter((name) => !applied.includes(name)) ?? [];
+      const unknown = expected === null;
+
       body = {
-        ok: pending.length === 0,
+        ok: !unknown && pending.length === 0,
         database: 'ok',
         driver: handle.driver,
-        schema: pending.length === 0 ? 'applied' : 'pending',
+        schema: unknown ? 'unknown' : pending.length === 0 ? 'applied' : 'pending',
+        appliedMigrations: applied,
         ...(pending.length > 0 ? { pendingMigrations: pending } : {}),
-        ...(pending.length > 0 ? { detail: 'Run: npm run db:deploy' } : {}),
+        ...(unknown
+          ? { detail: 'Connected, but this build cannot read its own migration list.' }
+          : pending.length > 0
+            ? { detail: 'Run: npm run db:deploy' }
+            : {}),
       };
     }
   } catch (err) {

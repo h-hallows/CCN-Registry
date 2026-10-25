@@ -8,6 +8,15 @@ const nextConfig: NextConfig = {
    * its data directory.
    */
   serverExternalPackages: ['@electric-sql/pglite', 'pg'],
+  /**
+   * The migration SQL files are read at runtime by lib/db/migrate.ts, which /api/health
+   * uses to report which migrations are pending. Next traces imports, not readdir calls,
+   * so without this the directory is simply absent from the deployed bundle and the
+   * health route throws before it can report anything.
+   */
+  outputFileTracingIncludes: {
+    '/api/health': ['./lib/db/migrations/**/*.sql'],
+  },
   // The data here is health-adjacent information about private individuals.
   // No public surface in V1 (§ 9), so nothing is indexable and nothing is cached.
   async headers() {

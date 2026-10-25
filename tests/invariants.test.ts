@@ -41,10 +41,15 @@ describe('I12 — an ineligible provider never reaches a shortlist', () => {
       }
       // Whatever else is true, nothing with a blocking credential may be in the list.
       for (const entry of shortlist!.eligible) {
+        // Every expiry comparison in this system runs in California. `current_date` is
+        // the server's date, which on a UTC host is a day ahead of Pacific between 5pm
+        // and midnight — enough to call a credential expiring today 'expired' and fail
+        // this test against an application that correctly calls it 'critical'.
         const blocking = await db.query(
           `SELECT 1 FROM credentials
             WHERE provider_id = $1 AND deleted_at IS NULL
-              AND expires_on IS NOT NULL AND expires_on < current_date`,
+              AND expires_on IS NOT NULL
+              AND expires_on < (now() AT TIME ZONE 'America/Los_Angeles')::date`,
           [entry.providerId],
         );
         expect(blocking).toHaveLength(0);

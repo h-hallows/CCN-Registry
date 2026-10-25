@@ -48,7 +48,8 @@ export interface Tx {
   query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]>;
 }
 
-const OPERATOR_SETTING = `SET app.operator_id = 'operator'`;
+const OPERATOR_ID = 'operator';
+const OPERATOR_SETTING = `SET app.operator_id = '${OPERATOR_ID}'`;
 
 let cached: Promise<DbHandle> | null = null;
 
@@ -83,9 +84,12 @@ async function connectPostgres(connectionString: string): Promise<DbHandle> {
     connectionString,
     ssl: /\bsslmode=require\b/.test(connectionString) ? { rejectUnauthorized: true } : undefined,
     max: 8,
+    // The RLS policies in migration 0001 check app.operator_id. Setting it as a startup
+    // parameter means the connection is never usable without it. Doing the same from a
+    // `connect` event handler races the first real query on that connection, because the
+    // handler cannot be awaited.
+    options: `-c app.operator_id=${OPERATOR_ID}`,
   });
-  // Encryption in transit and at rest regardless of the HIPAA outcome (§ 2).
-  pool.on('connect', (client) => void client.query(OPERATOR_SETTING));
   return {
     db: drizzlePg(pool, { schema }),
     exec: async (sql) => void (await pool.query(sql)),
