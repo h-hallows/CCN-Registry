@@ -69,12 +69,48 @@ scripts/copy-lint.mjs  the I9 build gate
 
 ## Deploying
 
-Vercel plus Supabase or RDS. Encryption at rest and in transit regardless of the HIPAA
-outcome (COUNSEL.md question 4).
+Vercel plus Supabase, Neon or RDS. Encryption at rest and in transit regardless of the
+HIPAA outcome (COUNSEL.md question 4).
 
-**Connect as a non-owner role.** Row level security is enabled on every table from the
-first migration, but a table owner bypasses RLS, so the application role must not own the
-schema:
+### Two connection strings, not one
+
+| Variable | What it is | Used by |
+|---|---|---|
+| `DATABASE_URL` | the **pooled** connection | the running app |
+| `DIRECT_URL` | the **unpooled** connection | migrations and seeding |
+
+The distinction is load-bearing. Migration `0001_init.sql` contains `CREATE TYPE`,
+`CREATE FUNCTION` and `CREATE TRIGGER` statements — the append-only guards, the
+disclosure immutability guard, the physician check — and a pooler in transaction mode
+(Supabase port 6543, Neon's pooler, any pgbouncer) cannot execute them. Point `DIRECT_URL`
+at the direct host, usually port 5432.
+
+A production build with **no** `DATABASE_URL` refuses to start. It does not fall back to
+the embedded database: on a serverless host the filesystem is read-only and every
+invocation gets its own container, so the fallback would appear to work and then lose
+every session. There is deliberately no flag to re-enable it.
+
+### Getting a deployment running
+
+1. Provision Postgres 16. Set `DATABASE_URL`, `DIRECT_URL` and `OPERATOR_EMAILS` in the
+   Vercel project, for every environment.
+2. Apply the schema from a machine that can reach the database — **there is no migration
+   step in the deployment**, by design, so nothing can migrate a live database on a push:
+
+   ```bash
+   npm run db:deploy
+   ```
+
+   `db:deploy` only applies pending migrations. `db:reset` and `db:seed` both refuse to
+   run against a remote Postgres without `--i-mean-it`, because one drops the schema and
+   the other truncates every table.
+3. Check `/api/health`. It reports driver, reachability and which migrations are pending,
+   needs no sign-in, and returns nothing about any household or provider.
+
+### Connect as a non-owner role
+
+Row level security is enabled on every table from the first migration, but a table owner
+bypasses RLS, so the application role must not own the schema:
 
 ```sql
 CREATE ROLE ccn_app LOGIN PASSWORD '…';
@@ -83,7 +119,12 @@ GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO ccn_app;
 -- No DELETE: the compliance record is append-only by design.
 ```
 
-Set `DATABASE_URL` to that role with `sslmode=require`.
+### Sign-in
+
+There is no mail provider wired. The magic link is written to the server console, which
+on a deployed host means the function logs. Wiring Resend or Postmark is a deployment
+step; for a single-operator internal tool, host-level access protection in front of the
+whole site is the simpler answer.
 
 ## Before this tool is worth anything
 

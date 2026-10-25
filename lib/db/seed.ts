@@ -6,7 +6,7 @@
  * Everything is dated relative to today, so the seed stays meaningful whenever it runs.
  * Names, addresses and policy numbers are invented.
  */
-import { getDb, type DbHandle } from './client';
+import { openMigrationDb, type DbHandle } from './client';
 import { applyMigrations } from './migrate';
 import { addDays, civilLA, formatISODate } from '@/lib/domain/dates';
 import { writtenStatementDueOn } from '@/lib/domain/businessDays';
@@ -774,8 +774,22 @@ const isEntrypoint =
   process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`;
 
 async function main(): Promise<void> {
-  const handle = await getDb();
+  const handle = await openMigrationDb();
   console.log(`driver: ${handle.driver}`);
+
+  // Seeding truncates every table. On a remote database that is a data-loss event, so it
+  // takes an explicit flag rather than an accidental env var.
+  if (handle.driver === 'postgres' && !process.argv.includes('--i-mean-it')) {
+    console.error(
+      'Refusing to seed a remote Postgres.\n'
+      + 'This TRUNCATEs every table, including any real household and provider records. '
+      + 'If the database is genuinely empty and you want demonstration data, re-run with '
+      + '--i-mean-it.',
+    );
+    await handle.close();
+    process.exit(1);
+  }
+
   await applyMigrations(handle, { quiet: true });
   await handle.exec(`
     SET app.operator_id = 'seed';

@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "CCN Registry OS — internal operations tool for a California nurses' registry. Single operator, no public surface.",
+  "description": "CCN Registry OS \u2014 internal operations tool for a California nurses' registry. Single operator, no public surface.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -15,6 +15,7 @@
     "db:migrate": "tsx lib/db/migrate.ts",
     "db:reset": "tsx lib/db/migrate.ts --reset",
     "db:seed": "tsx lib/db/seed.ts",
+    "db:deploy": "tsx lib/db/migrate.ts",
     "db:up": "docker compose up -d && node scripts/wait-for-pg.mjs",
     "db:down": "docker compose down",
     "ci": "npm run lint:copy && npm run typecheck && npm run test"

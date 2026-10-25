@@ -7,12 +7,16 @@
  *  - DATABASE_URL unset -> embedded PGlite (WASM Postgres 16) at ./.pglite, so the
  *                          invariant triggers in migration 0001 can be exercised with
  *                          no server installed. Tests always use an in-memory PGlite.
+ *                          A production build refuses this fallback outright — see
+ *                          lib/env.ts for why.
  *
  * Either way the connection sets `app.operator_id`, which is what the RLS policies in
  * migration 0001 check.
  */
 import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres';
 import { drizzle as drizzlePglite } from 'drizzle-orm/pglite';
+import { resolveDatabaseConfig, resolveMigrationConfig } from '@/lib/env';
+import type { DatabaseConfig } from '@/lib/env';
 import * as schema from './schema';
 
 export type Database = ReturnType<typeof drizzlePg<typeof schema>> | ReturnType<typeof drizzlePglite<typeof schema>>;
@@ -54,8 +58,23 @@ export function getDb(): Promise<DbHandle> {
 }
 
 async function connect(): Promise<DbHandle> {
-  const url = process.env.DATABASE_URL?.trim();
-  return url ? connectPostgres(url) : connectPglite(process.env.PGLITE_DIR ?? './.pglite');
+  // Throws rather than falling back to an embedded database in production. See lib/env.ts.
+  return open(resolveDatabaseConfig(process.env));
+}
+
+function open(config: DatabaseConfig): Promise<DbHandle> {
+  return config.driver === 'postgres'
+    ? connectPostgres(config.url)
+    : connectPglite(process.env.PGLITE_DIR ?? './.pglite');
+}
+
+/**
+ * A fresh, uncached handle for migrations and seeding, over DIRECT_URL when one is set.
+ * A pooled connection cannot run migration 0001's CREATE TYPE / FUNCTION / TRIGGER
+ * statements, so this never shares the application's pool.
+ */
+export function openMigrationDb(): Promise<DbHandle> {
+  return open(resolveMigrationConfig(process.env));
 }
 
 async function connectPostgres(connectionString: string): Promise<DbHandle> {

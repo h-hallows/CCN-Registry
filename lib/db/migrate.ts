@@ -58,10 +58,29 @@ const isEntrypoint =
   process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`;
 
 async function main(): Promise<void> {
-  const { getDb } = await import('./client');
-  const handle = await getDb();
-  console.log(`driver: ${handle.driver}`);
-  await applyMigrations(handle, { reset: process.argv.includes('--reset') });
+  const { openMigrationDb } = await import('./client');
+  const { describeConnection } = await import('@/lib/env');
+  const handle = await openMigrationDb();
+  const target = process.env.DIRECT_URL?.trim() || process.env.DATABASE_URL?.trim();
+  console.log(`driver: ${handle.driver}${target ? ` -> ${describeConnection(target)}` : ''}`);
+
+  const reset = process.argv.includes('--reset');
+  if (reset && handle.driver === 'postgres') {
+    // --reset drops every table. Never let that happen to a remote database by accident.
+    if (process.argv.includes('--i-mean-it')) {
+      console.log('resetting a REMOTE database, as explicitly confirmed');
+    } else {
+      console.error(
+        'Refusing to --reset a remote Postgres.\n'
+        + 'This drops schema public and everything in it. If that is genuinely what you '
+        + 'want, re-run with --i-mean-it.',
+      );
+      await handle.close();
+      process.exit(1);
+    }
+  }
+
+  await applyMigrations(handle, { reset });
   await handle.close();
 }
 
