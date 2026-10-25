@@ -22,6 +22,26 @@ export interface EnvLike {
   NODE_ENV?: string | undefined;
   DATABASE_URL?: string | undefined;
   DIRECT_URL?: string | undefined;
+  // Injected automatically when the database is provisioned through the Vercel
+  // marketplace. Reading them means a correct deployment needs nothing set by hand,
+  // and nobody has to know which of these is the pooled one.
+  POSTGRES_URL?: string | undefined;
+  DATABASE_URL_UNPOOLED?: string | undefined;
+  POSTGRES_URL_NON_POOLING?: string | undefined;
+}
+
+/** In order of preference. The first non-empty one wins. */
+const POOLED_KEYS = ['DATABASE_URL', 'POSTGRES_URL'] as const;
+const DIRECT_KEYS = [
+  'DIRECT_URL', 'DATABASE_URL_UNPOOLED', 'POSTGRES_URL_NON_POOLING',
+] as const;
+
+function firstSet(env: EnvLike, keys: readonly (keyof EnvLike)[]): string | undefined {
+  for (const key of keys) {
+    const value = env[key]?.trim();
+    if (value) return value;
+  }
+  return undefined;
 }
 
 export type DatabaseConfig =
@@ -41,7 +61,7 @@ const SETUP_HINT =
  * environment.
  */
 export function resolveDatabaseConfig(env: EnvLike): DatabaseConfig {
-  const url = env.DATABASE_URL?.trim();
+  const url = firstSet(env, POOLED_KEYS);
   if (url) return { driver: 'postgres', url };
 
   if (isProduction(env)) {
@@ -65,9 +85,34 @@ export function resolveDatabaseConfig(env: EnvLike): DatabaseConfig {
  * Point DIRECT_URL at the unpooled host.
  */
 export function resolveMigrationConfig(env: EnvLike): DatabaseConfig {
-  const direct = env.DIRECT_URL?.trim();
+  const direct = firstSet(env, DIRECT_KEYS);
   if (direct) return { driver: 'postgres', url: direct };
-  return resolveDatabaseConfig(env);
+
+  // No direct connection given. Falling back to the pooled one is right for a local
+  // Postgres, where they are the same thing, and wrong for a managed one — so say so
+  // rather than failing later with a syntax error on CREATE TRIGGER.
+  const pooled = resolveDatabaseConfig(env);
+  if (pooled.driver === 'postgres' && looksPooled(pooled.url)) {
+    throw new ConfigError(
+      `The only connection available looks like a pooled one (${describeConnection(pooled.url)}).\n\n`
+      + 'Migration 0001 contains CREATE TYPE, CREATE FUNCTION and CREATE TRIGGER '
+      + 'statements, and a pooler in transaction mode cannot execute them.\n\n'
+      + 'Set DIRECT_URL to the unpooled connection — on Supabase that is the session '
+      + 'pooler or direct connection on port 5432, not the transaction pooler on 6543.',
+    );
+  }
+  return pooled;
+}
+
+/** Transaction-mode poolers announce themselves by port or hostname. */
+function looksPooled(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.port === '6543' || /\bpooler\b|\bpgbouncer\b/.test(parsed.hostname)
+      || /[?&]pgbouncer=true/.test(url);
+  } catch {
+    return false;
+  }
 }
 
 function isProduction(env: EnvLike): boolean {

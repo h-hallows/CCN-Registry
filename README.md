@@ -92,8 +92,18 @@ every session. There is deliberately no flag to re-enable it.
 
 ### Getting a deployment running
 
-1. Provision Postgres 16. Set `DATABASE_URL`, `DIRECT_URL` and `OPERATOR_EMAILS` in the
-   Vercel project, for every environment.
+Provision the database **through Vercel** — Storage → Marketplace → Supabase. Doing it
+there injects the connection strings into the project automatically, and `lib/env.ts`
+reads the names Vercel uses (`POSTGRES_URL`, `POSTGRES_URL_NON_POOLING`,
+`DATABASE_URL_UNPOOLED`) as well as its own, so there is nothing to copy by hand.
+Supabase rather than Neon because architecture spec § 4 puts all four portal roles on
+Supabase Auth, and standing Postgres up elsewhere now means moving it later.
+
+Then:
+
+1. Set `OPERATOR_EMAILS` in the Vercel project. Nobody can sign in without it, and the
+   sign-in form deliberately gives the same answer either way, so an empty value looks
+   like success.
 2. Apply the schema from a machine that can reach the database — **there is no migration
    step in the deployment**, by design, so nothing can migrate a live database on a push:
 
@@ -104,8 +114,14 @@ every session. There is deliberately no flag to re-enable it.
    `db:deploy` only applies pending migrations. `db:reset` and `db:seed` both refuse to
    run against a remote Postgres without `--i-mean-it`, because one drops the schema and
    the other truncates every table.
-3. Check `/api/health`. It reports driver, reachability and which migrations are pending,
-   needs no sign-in, and returns nothing about any household or provider.
+3. Run `scripts/sql/app-role.sql` in the Supabase SQL editor and point the application at
+   that role. See below for why.
+4. Check `/api/health`. It reports driver, reachability and pending migrations, needs no
+   sign-in, and returns nothing about any household or provider.
+
+If step 2 fails on `CREATE TRIGGER`, the migration is going through the transaction
+pooler. `resolveMigrationConfig` refuses that case with a message naming the host — set
+`DIRECT_URL` to the session pooler or direct connection on **port 5432**, not 6543.
 
 ### Connect as a non-owner role
 

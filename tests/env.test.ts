@@ -55,15 +55,75 @@ describe('resolveDatabaseConfig', () => {
   });
 });
 
+describe('Vercel marketplace variables', () => {
+  it('uses POSTGRES_URL when DATABASE_URL is absent', () => {
+    expect(resolveDatabaseConfig({ NODE_ENV: 'production', POSTGRES_URL: POOLED }))
+      .toEqual({ driver: 'postgres', url: POOLED });
+  });
+
+  it('prefers an explicit DATABASE_URL over the injected one', () => {
+    expect(resolveDatabaseConfig({ DATABASE_URL: REMOTE, POSTGRES_URL: POOLED }))
+      .toEqual({ driver: 'postgres', url: REMOTE });
+  });
+
+  it('finds the unpooled connection under either injected name', () => {
+    expect(resolveMigrationConfig({ POSTGRES_URL: POOLED, DATABASE_URL_UNPOOLED: REMOTE }))
+      .toEqual({ driver: 'postgres', url: REMOTE });
+    expect(resolveMigrationConfig({ POSTGRES_URL: POOLED, POSTGRES_URL_NON_POOLING: REMOTE }))
+      .toEqual({ driver: 'postgres', url: REMOTE });
+  });
+
+  it('prefers an explicit DIRECT_URL over the injected ones', () => {
+    expect(resolveMigrationConfig({
+      DIRECT_URL: REMOTE, DATABASE_URL_UNPOOLED: POOLED, POSTGRES_URL_NON_POOLING: POOLED,
+    })).toEqual({ driver: 'postgres', url: REMOTE });
+  });
+});
+
+describe('migrating through a pooler is refused', () => {
+  it('rejects a transaction pooler on port 6543', () => {
+    expect(() => resolveMigrationConfig({ DATABASE_URL: POOLED }))
+      .toThrow(/pooled|CREATE TRIGGER/i);
+  });
+
+  it('rejects a host that announces itself as a pooler', () => {
+    expect(() => resolveMigrationConfig({
+      DATABASE_URL: 'postgres://u:p@aws-0-us-west-1.pooler.supabase.com:5432/postgres',
+    })).toThrow(/pooled/i);
+  });
+
+  it('rejects a pgbouncer query flag', () => {
+    expect(() => resolveMigrationConfig({
+      DATABASE_URL: 'postgres://u:p@db.example.com:5432/ccn?pgbouncer=true',
+    })).toThrow(/pooled/i);
+  });
+
+  it('allows a plain direct connection as the only URL, which is the local case', () => {
+    expect(resolveMigrationConfig({ DATABASE_URL: REMOTE }))
+      .toEqual({ driver: 'postgres', url: REMOTE });
+  });
+
+  it('names the host but never the password when it refuses', () => {
+    try {
+      resolveMigrationConfig({ DATABASE_URL: POOLED });
+      throw new Error('expected a ConfigError');
+    } catch (err) {
+      const message = (err as Error).message;
+      expect(message).toContain('db.example.com:6543');
+      expect(message).not.toContain('secret');
+    }
+  });
+});
+
 describe('resolveMigrationConfig', () => {
   it('prefers DIRECT_URL, because a pooler cannot run migration 0001', () => {
     expect(resolveMigrationConfig({ DATABASE_URL: POOLED, DIRECT_URL: REMOTE }))
       .toEqual({ driver: 'postgres', url: REMOTE });
   });
 
-  it('falls back to DATABASE_URL when no direct connection is given', () => {
-    expect(resolveMigrationConfig({ DATABASE_URL: POOLED }))
-      .toEqual({ driver: 'postgres', url: POOLED });
+  it('falls back to DATABASE_URL when it is not itself a pooler', () => {
+    expect(resolveMigrationConfig({ DATABASE_URL: REMOTE }))
+      .toEqual({ driver: 'postgres', url: REMOTE });
   });
 
   it('applies the same production rule', () => {
