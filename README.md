@@ -1,9 +1,10 @@
 # CCN Registry OS
 
 Internal operations tool for a California nurses' registry. One operator, no public
-surface. Built to [`docs/ccn-registry-os-build-spec.md`](docs/ccn-registry-os-build-spec.md) v2.0.
+surface. Built to [`docs/ccn-registry-os-build-spec.md`](docs/ccn-registry-os-build-spec.md) v2.0 and
+[`docs/ccn-architecture-build-spec.md`](docs/ccn-architecture-build-spec.md) v1.0.
 
-**Read [`INVARIANTS.md`](INVARIANTS.md) before changing anything.** Each rule there maps
+**Read [`packages/core/INVARIANTS.md`](packages/core/INVARIANTS.md) before changing anything.** Each rule there maps
 to a condition in Civil Code § 1812.5095(b) or Unemployment Insurance Code § 687.2, and
 those nine factors are the only mechanism keeping a referred provider from being treated
 as the registry's employee. Labor Code § 2777's referral agency exemption does not apply
@@ -46,25 +47,45 @@ npm run ci                      # copy lint, typecheck, tests
 | Command | What it guards |
 |---|---|
 | `npm run lint:copy` | I9 forbidden copy, and the I1/I2/I7/I8 forbidden identifiers |
-| `npm run typecheck` | TypeScript strict, `noUncheckedIndexedAccess` |
-| `npm test` | 96 tests, including the § 7.3 invariant gate against a real Postgres |
+| `npm run typecheck` | TypeScript strict, `noUncheckedIndexedAccess`, both workspaces |
+| `npm test` | 142 tests across both suites, including the invariant gate |
 
-The § 7.3 tests run against an in-memory Postgres with the real migration applied, so the
-append-only triggers, the physician trigger and the check constraints are exercised rather
-than mocked.
+The invariant tests run against an in-memory Postgres with the real migrations applied,
+so the append-only triggers, the physician trigger and the check constraints are
+exercised rather than mocked. Set `TEST_DATABASE_URL` to run the same suites against a
+real Postgres 16 — that database is truncated and reseeded, so point it at a throwaway.
 
 ## Layout
 
+An npm workspace. See [ARCHITECTURE.md](ARCHITECTURE.md) for why, and for how it splits
+into three repositories.
+
 ```
-app/(app)/today        ranked work queue — seven buckets (§ 5)
-app/(app)/roster       roster and the credential vault
-app/(app)/cases        households, cases, append-only timeline
-app/(app)/match        hard filters, then the referral behind the disclosure gate
-app/(app)/compliance   credential queue, re-verification, disclosure log, CSV export
-lib/domain             credentials, match, businessDays, buckets, referral, dates
-lib/queries            the query layer — eligibility is computed here, never in the UI
-lib/db                 schema.ts, migrations/, seed.ts, client.ts
-scripts/copy-lint.mjs  the I9 build gate
+packages/core          @ccn/core — schema, migrations, pure domain, the lint ruleset
+  src/schema           Drizzle schema and the types derived from it
+  src/domain           credentials, match, businessDays, dates, care — all pure
+  src/db               client, migrate, seed
+  src/lint             the I9 ruleset and the ccn-lint CLI
+  src/testing          the seeded-database helper both suites use
+  migrations/          hand-written SQL, append-only
+  INVARIANTS.md        one copy; every app links to this file
+
+apps/registry          @ccn/registry — the operator console
+  app/(app)/today      ranked work queue — seven buckets (§ 5)
+  app/(app)/roster     roster and the credential vault
+  app/(app)/cases      households, cases, append-only timeline
+  app/(app)/match      hard filters, then the referral behind the disclosure gate
+  app/(app)/compliance credential queue, re-verification, disclosure log, CSV export
+  lib/queries          the query layer — eligibility is computed here, never in the UI
+  lib/domain           buckets and the referral transaction (console-only)
+```
+
+Commands run from the repository root and delegate to the right workspace:
+
+```bash
+npm run dev          # the console
+npm run ci           # lint, typecheck, both test suites
+npm run db:deploy    # apply pending migrations (owned by @ccn/core)
 ```
 
 ## Deploying

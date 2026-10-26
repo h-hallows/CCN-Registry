@@ -1,46 +1,30 @@
 {
-  "name": "ccn-registry-os",
-  "version": "1.0.0",
+  "name": "ccn",
+  "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "CCN Registry OS \u2014 internal operations tool for a California nurses' registry. Single operator, no public surface.",
+  "description": "CCN workspaces. packages/core is the library both apps consume; apps/* are the deployables.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "lint:copy": "node scripts/copy-lint.mjs",
-    "db:migrate": "tsx lib/db/migrate.ts",
-    "db:reset": "tsx lib/db/migrate.ts --reset",
-    "db:seed": "tsx lib/db/seed.ts",
-    "db:deploy": "tsx lib/db/migrate.ts",
+    "dev": "npm run dev --workspace=@ccn/registry",
+    "build": "npm run build --workspace=@ccn/registry",
+    "start": "npm run start --workspace=@ccn/registry",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint:copy": "npm run lint:copy --workspaces --if-present",
+    "ci": "npm run lint:copy && npm run typecheck && npm run test",
+    "db:deploy": "npm run db:deploy --workspace=@ccn/core",
+    "db:migrate": "npm run db:migrate --workspace=@ccn/core",
+    "db:reset": "npm run db:reset --workspace=@ccn/core",
+    "db:seed": "npm run db:seed --workspace=@ccn/core",
     "db:up": "docker compose up -d && node scripts/wait-for-pg.mjs",
-    "db:down": "docker compose down",
-    "ci": "npm run lint:copy && npm run typecheck && npm run test"
-  },
-  "dependencies": {
-    "drizzle-orm": "^0.36.4",
-    "next": "^15.1.6",
-    "pg": "^8.13.1",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "zod": "^3.24.1"
+    "db:down": "docker compose down"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.2.17",
-    "@tailwindcss/postcss": "^4.0.0",
-    "@types/node": "^22.10.6",
-    "@types/pg": "^8.11.10",
-    "@types/react": "^19.0.7",
-    "@types/react-dom": "^19.0.3",
-    "tailwindcss": "^4.0.0",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.3",
-    "vitest": "^2.1.8"
+    "typescript": "^5.7.3"
   },
-  "engines": {
-    "node": ">=20.11"
-  }
+  "engines": { "node": ">=20.11" }
 }

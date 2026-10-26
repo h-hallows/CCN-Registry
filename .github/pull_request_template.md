@@ -2,7 +2,7 @@
 
 <!-- one paragraph -->
 
-## Invariant check — `/INVARIANTS.md`
+## Invariant check — `packages/core/INVARIANTS.md`
 
 Confirm each. If any box is unchecked, say why in the paragraph below it.
 

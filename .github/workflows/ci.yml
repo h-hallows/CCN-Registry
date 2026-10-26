@@ -16,6 +16,8 @@ jobs:
           node-version: '22'
           cache: npm
 
+      # Installs every workspace and links @ccn/core, so the console builds against the
+      # library source rather than a published copy.
       - run: npm ci
 
       # I9, and the I1/I2/I7/I8 forbidden identifiers. Fails the build.
@@ -25,10 +27,30 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      # § 7.3 runs against an in-memory Postgres with the real migration applied, so the
-      # append-only triggers and check constraints are exercised, not mocked.
+      # The schema invariants live in @ccn/core so they cannot be weakened in one app
+      # without the other noticing. They run against an in-memory Postgres with the real
+      # migrations applied, so the triggers and constraints are exercised, not mocked.
       - name: Tests, including the invariant gate
         run: npm test
 
       - name: Build
         run: npm run build
+
+  # Architecture spec § 8: migrations have exactly one owner.
+  migrations-have-one-owner:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No app may carry migrations or drizzle-kit
+        run: |
+          set -e
+          if find apps -type d -name 'migrations' | grep -q .; then
+            echo "An app contains a migrations directory. Migrations belong to @ccn/core."
+            find apps -type d -name 'migrations'
+            exit 1
+          fi
+          if grep -rl '"drizzle-kit"' apps/*/package.json 2>/dev/null | grep -q .; then
+            echo "An app depends on drizzle-kit. Only @ccn/core may generate migrations."
+            exit 1
+          fi
+          echo "ok: migrations and drizzle-kit live only in packages/core"
