@@ -13,8 +13,10 @@ packages/core        @ccn/core — owns the database and the rules that must not
 apps/registry        @ccn/registry — the operator console. A consumer of @ccn/core.
                      → Vercel project 1, non-obvious host, noindex
 
-apps/web             not built yet. The marketing site, client portal, provider portal
-                     and partner portal. Awaits ccn-front-door-spec.md.
+apps/web             @ccn/web — the front door. Scaffolded to architecture spec § 6:
+                     the statutory footer mechanism, the three public intake routes,
+                     and the rendering and header rules. The marketing pages and the
+                     three portals await ccn-front-door-spec.md.
                      → Vercel project 2, apex domain + app subdomain
 ```
 
@@ -42,6 +44,7 @@ Split along one line — the database versus the code that writes through it:
 |---|---|
 | `packages/core/tests` | append-only triggers, check constraints, enum membership, the physician trigger, row-level security, the front-door schema, the credential engine, business days, the lint itself |
 | `apps/registry/tests` | the referral transaction, the shortlist query layer, the credential vault, the Today buckets |
+| `apps/web/tests` | that public intake creates no live record, that no path reaches the compliance record, that the statutory footer cannot be removed or shipped unapproved |
 
 The schema half lives in `@ccn/core` so it cannot be weakened in one app without the
 other noticing.
@@ -73,6 +76,26 @@ workspace, the console's project needs:
 | Root Directory | `apps/registry` |
 | Install Command | `npm install` run from the repository root (Vercel does this when "Include files outside the root directory" is on) |
 
+The front door, when it ships, is a second Vercel project:
+
+| Setting | `ccn-registry` | `ccn-web` |
+|---|---|---|
+| Root Directory | `apps/registry` | `apps/web` |
+| Domain | non-obvious host | apex + `app.` subdomain |
+| `X-Robots-Tag` | `noindex, nofollow` everywhere | `noindex` on `/portal`, `/pro`, `/partner` only |
+
 **That Root Directory setting is not optional.** The console used to be at the repository
 root; it is now at `apps/registry`, and a deployment pointed at the old location will
 build nothing.
+
+## What stops the front door shipping
+
+`apps/web/content/statutory/` holds the § 1812.5095(f) and (d) notices and the footer
+statement. **They are empty.** They are legal notices rather than copy, and a
+plausible-looking one is worse than a blank: it is the kind nobody checks. They come from
+the attorney in COUNSEL.md.
+
+Until each is marked `approved`, `StatutoryFooter` throws during a build where
+`VERCEL_ENV=production`, so the public site cannot ship without them. Local builds and
+preview deploys render a loud placeholder instead — the gate is meant to stop shipping,
+not to stop work.

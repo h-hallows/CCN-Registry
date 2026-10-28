@@ -1,0 +1,30 @@
+@import 'tailwindcss';
+
+/*
+ * The front door is light by default — it is read by people deciding whether to trust
+ * the business, not by an operator at 11pm. The console's palette is deliberately not
+ * shared: these are different products with different jobs.
+ */
+:root {
+  --ink: #1b1d22;
+  --ink-soft: #4d525c;
+  --page: #ffffff;
+  --line: #e4e4df;
+  color-scheme: light;
+}
+
+body {
+  background: var(--page);
+  color: var(--ink);
+  font-family: ui-serif, Georgia, 'Times New Roman', serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.statutory {
+  border-top: 1px solid var(--line);
+  margin-top: 3rem;
+  padding: 1.25rem 0;
+  color: var(--ink-soft);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}

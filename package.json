@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspace=@ccn/registry",
-    "build": "npm run build --workspace=@ccn/registry",
+    "build": "npm run build --workspaces --if-present",
     "start": "npm run start --workspace=@ccn/registry",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
@@ -21,10 +21,15 @@
     "db:reset": "npm run db:reset --workspace=@ccn/core",
     "db:seed": "npm run db:seed --workspace=@ccn/core",
     "db:up": "docker compose up -d && node scripts/wait-for-pg.mjs",
-    "db:down": "docker compose down"
+    "db:down": "docker compose down",
+    "dev:web": "npm run dev --workspace=@ccn/web",
+    "build:registry": "npm run build --workspace=@ccn/registry",
+    "build:web": "npm run build --workspace=@ccn/web"
   },
   "devDependencies": {
     "typescript": "^5.7.3"
   },
-  "engines": { "node": ">=20.11" }
+  "engines": {
+    "node": ">=20.11"
+  }
 }
