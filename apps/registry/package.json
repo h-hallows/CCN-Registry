@@ -3,14 +3,14 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "CCN Registry OS — operator console. Single operator, no public surface.",
+  "description": "CCN Registry OS \u2014 operator console. Single operator, no public surface.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint:copy": "ccn-lint ./app ./components",
+    "lint:copy": "ccn-lint ./app ./components ./content",
     "pretest": "npm run lint:copy"
   },
   "dependencies": {
