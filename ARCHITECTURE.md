@@ -2,26 +2,31 @@
 
 Built to `docs/ccn-architecture-build-spec.md` v1.0.
 
-## Where things are
+## Two repositories
 
 ```
-packages/core        @h-hallows/core — owns the database and the rules that must not differ
-                     between surfaces: Drizzle schema, migrations, the credential
-                     engine, business-day arithmetic, the care vocabulary, and the
-                     copy-lint ruleset. No app, no routes.
+CCN-Registry        this one. The internal operator console, and the package that
+                    owns the database.
+  packages/core     @h-hallows/core — Drizzle schema, migrations, the credential
+                    engine, business-day arithmetic, the care vocabulary, the
+                    copy-lint ruleset. No app, no routes.
+  apps/registry     the console. Single operator, no public surface.
+                    → Vercel project 1, non-obvious host, noindex everywhere
 
-apps/registry        @h-hallows/registry — the operator console. A consumer of @h-hallows/core.
-                     → Vercel project 1, non-obvious host, noindex
-
-apps/web             @h-hallows/web — the front door. Scaffolded to architecture spec § 6:
-                     the statutory footer mechanism, the three public intake routes,
-                     and the rendering and header rules. The marketing pages and the
-                     three portals await ccn-front-door-spec.md.
-                     → Vercel project 2, apex domain + app subdomain
+CCN-external        the public platform. Marketing site plus the household, provider
+                    and partner portals. A consumer of @h-hallows/core; owns no
+                    schema.
+                    → Vercel project 2, apex domain, portals as paths
 ```
 
-One Postgres. `@h-hallows/core` owns migrations; **no app ever runs its own**, and CI fails if
-one acquires a `migrations/` directory or a `drizzle-kit` dependency.
+One Postgres. `@h-hallows/core` owns migrations, and neither app ever runs its own —
+CI in both repositories fails if one acquires a `migrations/` directory, a `drizzle-kit`
+dependency, or a second `eligibility()`.
+
+**On the scope.** The architecture spec says `@ccn/core`. GitHub Packages requires the
+npm scope to match the repository owner, there is no `ccn` organisation, and `ccn` is
+already a GitHub user account — so the scope is `@h-hallows`. Read one for the other
+wherever the spec documents under `docs/` say `@ccn`.
 
 ## Why a package rather than a shared folder
 
@@ -44,27 +49,23 @@ Split along one line — the database versus the code that writes through it:
 |---|---|
 | `packages/core/tests` | append-only triggers, check constraints, enum membership, the physician trigger, row-level security, the front-door schema, the credential engine, business days, the lint itself |
 | `apps/registry/tests` | the referral transaction, the shortlist query layer, the credential vault, the Today buckets |
-| `apps/web/tests` | that public intake creates no live record, that no path reaches the compliance record, that the statutory footer cannot be removed or shipped unapproved |
+| CCN-external's `tests/` | that public intake creates no live record, that no path reaches the compliance record, that a household sees only its own shortlist, and that the statutory footer cannot be removed or shipped unapproved |
 
 The schema half lives in `@h-hallows/core` so it cannot be weakened in one app without the
 other noticing.
 
-## Splitting this into three repositories
+## The split, and what is left of it
 
-The spec's target is three repositories with `@h-hallows/core` published to GitHub Packages.
-This workspace is the same layout, so the split is a move rather than a refactor:
+`apps/web` lived here while the public platform was built and now lives in
+**CCN-external**, moved with `git subtree split` so its history came too. This
+repository holds `packages/core` and `apps/registry` only.
 
-1. `git subtree split --prefix=packages/core` into `ccn-core`, publish `0.1.0`.
-2. `git subtree split --prefix=apps/registry` into `ccn-registry`.
-3. In each app, replace the workspace link with the pinned dependency — the version in
-   `package.json` is already an exact pin, not a range, for exactly this reason.
-4. Add `.npmrc` and `GITHUB_PACKAGES_TOKEN` to both Vercel projects.
+One step remains: **`@h-hallows/core` is not published.** Until it is, CCN-external
+cannot `npm install`. See `PUBLISHING.md`.
 
-**One thing to add when you split.** Spec § 10's acceptance test — *"eligibility()
-imported in both apps returns identical results for the same fixture"* — cannot run
-across repositories, and exact pinning is precisely the mechanism that lets the two apps
-drift apart. Add a CI check that both apps pin the **same** `@h-hallows/core` version, or that
-test can only ever prove the fixture matches itself.
+`apps/registry` could split out the same way, but there is little point — it is the only
+consumer left here, and a workspace of two that are always released together is not a
+problem worth solving.
 
 ## Deployment
 
@@ -76,11 +77,11 @@ workspace, the console's project needs:
 | Root Directory | `apps/registry` |
 | Install Command | `npm install` run from the repository root (Vercel does this when "Include files outside the root directory" is on) |
 
-The front door, when it ships, is a second Vercel project:
+Two Vercel projects, one per repository:
 
-| Setting | `ccn-registry` | `ccn-web` |
+| Setting | CCN-Registry | CCN-external |
 |---|---|---|
-| Root Directory | `apps/registry` | `apps/web` |
+| Root Directory | `apps/registry` | `/` |
 | Domain | non-obvious host | apex + `app.` subdomain |
 | `X-Robots-Tag` | `noindex, nofollow` everywhere | `noindex` on `/portal`, `/pro`, `/partner` only |
 
@@ -90,7 +91,7 @@ build nothing.
 
 ## What stops the front door shipping
 
-`apps/web/content/statutory/` holds the § 1812.5095(f) and (d) notices and the footer
+CCN-external's `content/statutory/` holds the § 1812.5095(f) and (d) notices and the footer
 statement. **They are empty.** They are legal notices rather than copy, and a
 plausible-looking one is worse than a blank: it is the kind nobody checks. They come from
 the attorney in COUNSEL.md.

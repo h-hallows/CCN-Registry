@@ -78,6 +78,9 @@ apps/registry          @h-hallows/registry — the operator console
   app/(app)/compliance credential queue, re-verification, disclosure log, CSV export
   lib/queries          the query layer — eligibility is computed here, never in the UI
   lib/domain           buckets and the referral transaction (console-only)
+
+The public platform — marketing site and the three portals — is a separate
+repository, h-hallows/CCN-external. It consumes @h-hallows/core and owns no schema.
 ```
 
 Commands run from the repository root and delegate to the right workspace:

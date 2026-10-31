@@ -39,20 +39,18 @@ invariant it protects is intact.
 
 Treat W3–W5 as needing review against § 4.5 rather than as settled.
 
-## ccn-web now exists twice, and that is temporary
+## The public platform has moved out
 
-`apps/web` here was split into **h-hallows/CCN-external** with its history intact. That
-repository cannot `npm install` until `@h-hallows/core` is published, so for now:
+`apps/web` is gone from here. It lives in **h-hallows/CCN-external**, with its history,
+and that repository has its own CI asserting it owns no schema. There is one copy again.
 
-- **`apps/web` in this workspace is authoritative.** It is the copy CI builds and tests
-  against the live core.
-- **CCN-external is the destination**, not yet the source. Do not edit it.
+This repository is now the internal tool and the package the other one consumes:
+`packages/core` and `apps/registry`.
 
-Two editable copies of a codebase whose whole point is one implementation of
-`eligibility()` is precisely the failure mode the hard stops exist to prevent, so this
-state should be short. It ends when `@h-hallows/core@0.1.0` is published to GitHub Packages
-and `apps/web` is deleted from here — at which point this workspace holds `packages/core`
-and `apps/registry` only.
+**The one remaining step is publishing.** `@h-hallows/core` is unpublished, so
+CCN-external cannot `npm install` or deploy. `PUBLISHING.md` has it: a classic token
+with `write:packages`, one `npm publish`, then a read-only token on both Vercel
+projects.
 
 ## Still blocked, and by whom
 

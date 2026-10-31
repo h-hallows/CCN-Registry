@@ -3,14 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "CCN workspaces. packages/core is the library both apps consume; apps/* are the deployables.",
+  "description": "CCN Registry OS \u2014 the internal operator console, and @h-hallows/core, which owns the database. The public platform is a separate repository.",
   "workspaces": [
     "packages/*",
     "apps/*"
   ],
   "scripts": {
     "dev": "npm run dev --workspace=@h-hallows/registry",
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build --workspace=@h-hallows/registry",
     "start": "npm run start --workspace=@h-hallows/registry",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
@@ -22,9 +22,7 @@
     "db:seed": "npm run db:seed --workspace=@h-hallows/core",
     "db:up": "docker compose up -d && node scripts/wait-for-pg.mjs",
     "db:down": "docker compose down",
-    "dev:web": "npm run dev --workspace=@h-hallows/web",
-    "build:registry": "npm run build --workspace=@h-hallows/registry",
-    "build:web": "npm run build --workspace=@h-hallows/web"
+    "build:registry": "npm run build --workspace=@h-hallows/registry"
   },
   "devDependencies": {
     "typescript": "^5.7.3"
