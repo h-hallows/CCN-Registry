@@ -15,7 +15,7 @@
  * wrong, which is what you already knew.
  */
 import { getDb } from '@ccn/core/db';
-import { ConfigError } from '@ccn/core/env';
+import { ConfigError, describeEnvPresence } from '@ccn/core/env';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,6 +27,8 @@ interface Health {
   appliedMigrations?: string[];
   pendingMigrations?: string[];
   detail?: string;
+  /** Variable names only, never values. See describeEnvPresence. */
+  connectionVariables?: Record<string, boolean>;
 }
 
 /**
@@ -85,10 +87,13 @@ export async function GET(): Promise<Response> {
     body = {
       ok: false,
       database: configProblem ? 'not_configured' : 'unreachable',
+      connectionVariables: describeEnvPresence(process.env),
       // A ConfigError is written for a human and names no secret. Any other error could
       // carry a host or a credential, so it is logged rather than returned.
       detail: configProblem
-        ? (err as ConfigError).message
+        ? `${(err as ConfigError).message}\n\nIf you have just added the variable in `
+          + 'Vercel, redeploy — environment changes do not reach a deployment that was '
+          + 'already built.'
         : 'Could not reach the database. See the server logs.',
     };
     if (!configProblem) console.error('[health] database unreachable', err);
