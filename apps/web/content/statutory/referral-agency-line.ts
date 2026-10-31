@@ -12,6 +12,7 @@
  * "insured", or a badge standing in for them. § 1812.5095(i)–(j) bars advertising them
  * outright, and the lint enforces that even inside this directory.
  */
+import { LEGAL_NAME } from '@/lib/brand';
 import type { StatutoryText } from './types';
 
 export const MIN_POINT_SIZE = 6;
@@ -22,7 +23,7 @@ export const REFERRAL_AGENCY_LINE: StatutoryText = {
   status: 'statute',
   citation: 'Cal. Civ. Code § 1812.5095(h)',
   purpose: 'First line of the footer on every public page.',
-  text: 'Century City Concierge Nursing is a referral agency.',
+  text: `${LEGAL_NAME} is a referral agency.`,
 };
 
 /**

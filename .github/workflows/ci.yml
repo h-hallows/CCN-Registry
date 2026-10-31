@@ -24,6 +24,12 @@ jobs:
       - name: Copy lint
         run: npm run lint:copy
 
+      # Work order 01 § 3. The trading name is blocked on counsel, so nothing may
+      # hardcode one — a literal would be a find-and-replace across every page and six
+      # statutory documents if the name turns out not to be usable.
+      - name: Brand lint
+        run: npm run lint:brand --workspaces --if-present
+
       - name: Typecheck
         run: npm run typecheck
 

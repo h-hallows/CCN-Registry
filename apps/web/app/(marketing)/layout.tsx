@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { StatutoryFooter } from '@/components/StatutoryFooter';
 import { Wrap } from '@/components/layout';
+import { DISPLAY_NAME } from '@/lib/brand';
 
 const NAV = [
   { href: '/how-it-works', label: 'How it works' },
@@ -27,7 +28,7 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
               fontFamily: 'var(--display)', fontSize: 'var(--step-1)',
               color: 'var(--ink)', textDecoration: 'none', letterSpacing: '-0.01em',
             }}>
-              Century City Concierge Nursing
+              {DISPLAY_NAME}
             </Link>
             <nav style={{ display: 'flex', flexWrap: 'wrap', gap: '1.25rem', fontSize: 'var(--step--1)' }}>
               {NAV.map((item) => (

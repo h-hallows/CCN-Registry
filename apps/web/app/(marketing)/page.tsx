@@ -1,9 +1,10 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { Prose, Section, Stack } from '@/components/layout';
+import { DISPLAY_NAME, LEGAL_NAME } from '@/lib/brand';
 
 export const metadata: Metadata = {
-  title: 'Century City Concierge Nursing',
+  title: DISPLAY_NAME,
   description:
     'A private nursing and caregiver referral registry serving Century City and West '
     + 'Los Angeles. We refer; you engage directly.',
@@ -15,10 +16,10 @@ export const metadata: Metadata = {
  * § 1812.533(b)(4). No aggregateRating, because there are no public ratings. No
  * priceRange, which would go stale. No award, licence or accreditation property.
  */
-const JSON_LD = {
+const jsonLd = () => ({
   '@context': 'https://schema.org',
   '@type': 'LocalBusiness',
-  name: 'Century City Concierge Nursing',
+  name: LEGAL_NAME,
   description:
     'A private nursing and caregiver referral registry serving Century City and West '
     + 'Los Angeles.',
@@ -27,14 +28,14 @@ const JSON_LD = {
     'Century City', 'Beverly Hills', 'Westwood', 'Brentwood', 'Bel Air',
     'Holmby Hills', 'Santa Monica', 'Pacific Palisades', 'Malibu',
   ],
-};
+});
 
 export default function Home() {
   return (
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(JSON_LD) }}
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd()) }}
       />
 
       <Stack gap="lg">

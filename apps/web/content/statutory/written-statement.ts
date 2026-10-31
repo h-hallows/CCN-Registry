@@ -9,6 +9,7 @@
  * separately bars CCN from using that label in its own copy — see this directory's
  * README for why both are true at once.
  */
+import { LEGAL_NAME } from '@/lib/brand';
 import type { StatutoryText } from './types';
 
 export const MIN_POINT_SIZE = 10;
@@ -22,7 +23,7 @@ export const WRITTEN_STATEMENT: StatutoryText = {
     'Mailed to the person engaging care within three California business days of the '
     + 'referral. Recorded as disclosures.written_sent_on.',
   text:
-    'Century City Concierge Nursing is not the employer of the domestic worker it '
+    `${LEGAL_NAME} is not the employer of the domestic worker it `
     + 'referred to you. The domestic worker may be your employee or an independent '
     + 'contractor depending on the relationship you have with him or her. If you direct '
     + 'and control the manner and means by which the domestic worker performs his or her '

@@ -5,6 +5,7 @@
  * disclosure modal displays this and the operator reads it aloud; the modal's
  * confirmation is what records that it happened.
  */
+import { LEGAL_NAME } from '@/lib/brand';
 import type { StatutoryText } from './types';
 
 export const ORAL_DISCLOSURE: StatutoryText = {
@@ -16,7 +17,7 @@ export const ORAL_DISCLOSURE: StatutoryText = {
     'Read aloud to the person engaging care before a referral is made. Recorded as a '
     + 'disclosures row in the same transaction as the referral.',
   text:
-    'Century City Concierge Nursing is not the employer of the domestic worker it '
+    `${LEGAL_NAME} is not the employer of the domestic worker it `
     + 'referred to you. Depending on your arrangement with the domestic worker, you may '
     + 'have employer responsibilities.',
 };

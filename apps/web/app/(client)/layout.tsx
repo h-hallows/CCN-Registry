@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import { getPortalSession } from '@/lib/session';
 import { Wrap } from '@/components/layout';
+import { DISPLAY_NAME } from '@/lib/brand';
 
 /** Dynamic, server-rendered, never indexed. Spec § 6.2. */
 export const dynamic = 'force-dynamic';
@@ -24,7 +25,7 @@ export default async function ClientLayout({ children }: { children: React.React
             <Link href="/portal" style={{
               fontFamily: 'var(--display)', color: 'var(--ink)', textDecoration: 'none',
             }}>
-              Century City Concierge Nursing
+              {DISPLAY_NAME}
             </Link>
             <span className="label" style={{ marginLeft: 'auto' }}>{session.displayName}</span>
           </div>

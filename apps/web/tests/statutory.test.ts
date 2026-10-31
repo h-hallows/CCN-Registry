@@ -16,16 +16,17 @@ import {
   isDeliverable, NURSES_REGISTRY_DISCLOSURE, ORAL_DISCLOSURE, PROVIDER_NOTICE,
   REFERRAL_AGENCY_LINE, WRITTEN_STATEMENT, WRITTEN_STATEMENT_MIN_POINT,
 } from '@/content/statutory';
+import { contactLine, LEGAL_NAME, legalNameResolved } from '@/lib/brand';
 
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
 
 const ORAL_VERBATIM =
-  'Century City Concierge Nursing is not the employer of the domestic worker it '
+  `${LEGAL_NAME} is not the employer of the domestic worker it `
   + 'referred to you. Depending on your arrangement with the domestic worker, you may '
   + 'have employer responsibilities.';
 
 const WRITTEN_VERBATIM =
-  'Century City Concierge Nursing is not the employer of the domestic worker it '
+  `${LEGAL_NAME} is not the employer of the domestic worker it `
   + 'referred to you. The domestic worker may be your employee or an independent '
   + 'contractor depending on the relationship you have with him or her. If you direct '
   + 'and control the manner and means by which the domestic worker performs his or her '
@@ -103,10 +104,12 @@ describe('the footer carries both required lines', () => {
     expect(read('../app/(marketing)/page.tsx')).not.toContain('StatutoryFooter');
   });
 
-  it('renders the § 1812.5095(h) line and the § 1812.533(b)(2) contact', () => {
-    const footer = read('../components/StatutoryFooter.tsx');
-    expect(footer).toContain('REFERRAL_AGENCY_LINE.text');
-    expect(footer).toContain('BUSINESS_CONTACT.text');
+  it('composes the name from lib/brand rather than hardcoding one', () => {
+    for (const f of ['oral-disclosure', 'written-statement', 'nurses-registry-disclosure',
+      'provider-notice', 'referral-agency-line']) {
+      const src = read(`../content/statutory/${f}.ts`);
+      expect(src, `${f} hardcodes a name`).toContain('LEGAL_NAME');
+    }
   });
 
   it('imports its text rather than retyping it', () => {
@@ -124,10 +127,19 @@ describe('the footer carries both required lines', () => {
     expect(footer).toContain('throw new Error');
   });
 
-  it('cannot ship today: the business contact is unfilled', () => {
-    expect(BUSINESS_CONTACT.status).toBe('unfilled');
-    expect(isDeliverable(BUSINESS_CONTACT)).toBe(false);
-    expect(isDeliverable(REFERRAL_AGENCY_LINE)).toBe(true);
+  it('renders the correct name, not a marketing one — § 1812.533(b)(2)', () => {
+    const footer = read('../components/StatutoryFooter.tsx');
+    expect(footer).toContain('REFERRAL_AGENCY_LINE.text');
+    expect(footer).toContain('contactLine()');
+    // DISPLAY_NAME is for marketing headings; the statute asks for the correct name.
+    // Comments may explain that; the code may not use it.
+    const code = footer.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    expect(code).not.toContain('DISPLAY_NAME');
+  });
+
+  it('names what is missing rather than failing silently', () => {
+    const footer = read('../components/StatutoryFooter.tsx');
+    expect(footer).toContain('brandBlockers');
   });
 });
 
@@ -149,5 +161,23 @@ describe('point sizes are absolute, not inherited', () => {
 
   it('declares them in points, not rem — a rem can inherit smaller down a nesting chain', () => {
     expect(css).not.toMatch(/\.statutory\s*\{[^}]*font-size:\s*[\d.]+rem/);
+  });
+});
+
+describe('the brand is a token, not a literal', () => {
+  it('composes the statutory texts from the configured legal name', () => {
+    expect(legalNameResolved()).toBe(true);
+    expect(ORAL_DISCLOSURE.text.startsWith(LEGAL_NAME)).toBe(true);
+    expect(WRITTEN_STATEMENT.text.startsWith(LEGAL_NAME)).toBe(true);
+    expect(REFERRAL_AGENCY_LINE.text).toBe(`${LEGAL_NAME} is a referral agency.`);
+  });
+
+  it('gives the footer a contact line, satisfying § 1812.533(b)(2)', () => {
+    expect(contactLine().length).toBeGreaterThan(0);
+  });
+
+  it('still records BUSINESS_CONTACT as superseded by lib/brand', () => {
+    // Kept so an older import does not silently resolve to something shippable.
+    expect(isDeliverable(BUSINESS_CONTACT)).toBe(false);
   });
 });

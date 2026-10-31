@@ -11,6 +11,7 @@
  * one and breach the other, which is why migration 0004 makes it a status gate on the
  * case rather than a reminder.
  */
+import { LEGAL_NAME } from '@/lib/brand';
 import type { StatutoryText } from './types';
 
 export const NURSES_REGISTRY_DISCLOSURE: StatutoryText = {
@@ -23,10 +24,10 @@ export const NURSES_REGISTRY_DISCLOSURE: StatutoryText = {
     + 'complaint contacts, before they are under the care of any nursing personnel. '
     + 'Required for RN and LVN referrals.',
   text:
-    'Century City Concierge Nursing does not perform home health agency services. '
+    `${LEGAL_NAME} does not perform home health agency services. `
     + "It is a nurses' registry only.\n\n"
     + 'Nursing services are provided by a self-employed private duty nurse under the '
-    + 'direction of a physician. Century City Concierge Nursing does not employ, direct, '
+    + `direction of a physician. ${LEGAL_NAME} does not employ, direct, `
     + 'control or supervise the nurse in the performance of nursing services.\n\n'
     + 'Complaints concerning licensed nursing personnel may be directed to your local '
     + 'district attorney and to the California Department of Consumer Affairs. Contact '

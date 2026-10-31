@@ -14,3 +14,11 @@ if (externalDatabase) {
 }
 
 process.env.OPERATOR_EMAILS = 'operator@example.com';
+
+/**
+ * A stand-in legal name, so the statutory texts compose into something assertable.
+ * The real one is blocked on counsel; what the tests check is that the texts match the
+ * statute once a name exists, and separately that no file hardcodes one.
+ */
+process.env.NEXT_PUBLIC_LEGAL_NAME = 'Test Registry LLC';
+process.env.NEXT_PUBLIC_PHONE = '(310) 555-0000';

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "CCN front door — marketing site and the client, provider and partner portals.",
+  "description": "CCN front door \u2014 marketing site and the client, provider and partner portals.",
   "scripts": {
     "dev": "next dev --port 3003",
     "build": "next build",
@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint:copy": "ccn-lint ./app ./components ./content",
-    "pretest": "npm run lint:copy"
+    "pretest": "npm run lint:copy && npm run lint:brand",
+    "lint:brand": "node ../../scripts/brand-lint.mjs ./app ./components ./content ./lib"
   },
   "dependencies": {
     "@ccn/core": "0.1.0",

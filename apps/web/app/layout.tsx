@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { DISPLAY_NAME } from '@/lib/brand';
 import { siteUrl } from '@/lib/site';
 import './globals.css';
 
@@ -10,8 +11,8 @@ import './globals.css';
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl()),
   title: {
-    default: 'Century City Concierge Nursing',
-    template: '%s · Century City Concierge Nursing',
+    default: DISPLAY_NAME,
+    template: `%s · ${DISPLAY_NAME}`,
   },
   description:
     'A private nursing and caregiver referral registry serving Century City and West '
@@ -19,7 +20,7 @@ export const metadata: Metadata = {
   alternates: { canonical: '/' },
   openGraph: {
     type: 'website',
-    siteName: 'Century City Concierge Nursing',
+    siteName: DISPLAY_NAME,
     locale: 'en_US',
   },
   // No licensure, accreditation or award anywhere in metadata — § 1812.5095(i)–(j).

@@ -8,6 +8,7 @@
  * must already have been provided BEFORE the interview, not at signing. Two different
  * timings for two documents handed over in the same meeting.
  */
+import { LEGAL_NAME } from '@/lib/brand';
 import type { StatutoryText } from './types';
 
 export const PROVIDER_NOTICE: StatutoryText = {
@@ -22,8 +23,8 @@ export const PROVIDER_NOTICE: StatutoryText = {
     'You may be obliged to obtain business permits or licences where state or local law '
     + 'requires them.\n\n'
     + 'You are not eligible for unemployment insurance, state disability insurance, '
-    + 'Social Security or workers’ compensation benefits through Century City '
-    + 'Concierge Nursing.\n\n'
+    + `Social Security or workers’ compensation benefits through ${LEGAL_NAME}.`
+    + '\n\n'
     + 'Where you are self-employed, you are required to pay self-employment tax, state '
     + 'tax and federal income taxes.',
 };
