@@ -2,31 +2,44 @@
 
 Built to `docs/ccn-architecture-build-spec.md` v1.0.
 
-## Two repositories
+## Three repositories
 
 ```
-CCN-Registry        this one. The internal operator console, and the package that
-                    owns the database.
-  packages/core     @h-hallows/core — Drizzle schema, migrations, the credential
-                    engine, business-day arithmetic, the care vocabulary, the
-                    copy-lint ruleset. No app, no routes.
-  apps/registry     the console. Single operator, no public surface.
-                    → Vercel project 1, non-obvious host, noindex everywhere
+CCN-core        @h-hallows/core — owns the database. Drizzle schema, migrations, the
+                credential engine, business-day arithmetic, the care vocabulary, the
+                copy-lint ruleset. No app, no routes.
+                Consumed from git, pinned to a tag. No registry, no tokens.
 
-CCN-external        the public platform. Marketing site plus the household, provider
-                    and partner portals. A consumer of @h-hallows/core; owns no
-                    schema.
-                    → Vercel project 2, apex domain, portals as paths
+CCN-Registry    this one. The internal operator console.
+                → Vercel project 1, non-obvious host, noindex everywhere
+
+CCN-external    the public platform. Marketing site plus the household, provider and
+                partner portals.
+                → Vercel project 2, apex domain, portals as paths
 ```
 
-One Postgres. `@h-hallows/core` owns migrations, and neither app ever runs its own —
-CI in both repositories fails if one acquires a `migrations/` directory, a `drizzle-kit`
-dependency, or a second `eligibility()`.
+One Postgres. `@h-hallows/core` owns migrations; neither app runs its own, and CI in
+both fails on a `migrations/` directory, a `drizzle-kit` dependency, or a second
+`eligibility()`.
 
-**On the scope.** The architecture spec says `@ccn/core`. GitHub Packages requires the
-npm scope to match the repository owner, there is no `ccn` organisation, and `ccn` is
-already a GitHub user account — so the scope is `@h-hallows`. Read one for the other
-wherever the spec documents under `docs/` say `@ccn`.
+```jsonc
+"dependencies": { "@h-hallows/core": "github:h-hallows/CCN-core#v0.1.3" }
+```
+
+**Why a git dependency rather than a registry.** GitHub Packages needs the npm scope to
+match the repository owner and authenticates with a personal access token. All three
+repositories are public, so a tagged git dependency installs with no credentials at
+all — on a laptop, in CI, and on Vercel. The tag is still an exact pin, which is the
+property the specs actually ask for.
+
+**On the scope.** The architecture spec says `@ccn/core`. There is no `ccn` organisation
+and `ccn` is already a GitHub user, so the scope is `@h-hallows`. Read one for the other
+in the spec documents under `docs/`.
+
+**Working on core locally.** It is a dependency now, not a workspace link, so a change
+there means commit, tag, bump the consumer. For a tight loop, `npm install
+../CCN-core` in the consuming app points at a local checkout; put the tag back before
+committing.
 
 ## Why a package rather than a shared folder
 
@@ -53,19 +66,6 @@ Split along one line — the database versus the code that writes through it:
 
 The schema half lives in `@h-hallows/core` so it cannot be weakened in one app without the
 other noticing.
-
-## The split, and what is left of it
-
-`apps/web` lived here while the public platform was built and now lives in
-**CCN-external**, moved with `git subtree split` so its history came too. This
-repository holds `packages/core` and `apps/registry` only.
-
-One step remains: **`@h-hallows/core` is not published.** Until it is, CCN-external
-cannot `npm install`. See `PUBLISHING.md`.
-
-`apps/registry` could split out the same way, but there is little point — it is the only
-consumer left here, and a workspace of two that are always released together is not a
-problem worth solving.
 
 ## Deployment
 

@@ -61,14 +61,9 @@ An npm workspace. See [ARCHITECTURE.md](ARCHITECTURE.md) for why, and for how it
 into three repositories.
 
 ```
-packages/core          @h-hallows/core — schema, migrations, pure domain, the lint ruleset
-  src/schema           Drizzle schema and the types derived from it
-  src/domain           credentials, match, businessDays, dates, care — all pure
-  src/db               client, migrate, seed
-  src/lint             the I9 ruleset and the ccn-lint CLI
-  src/testing          the seeded-database helper both suites use
-  migrations/          hand-written SQL, append-only
-  INVARIANTS.md        one copy; every app links to this file
+@h-hallows/core        a dependency now, from github:h-hallows/CCN-core at a tag.
+                       Schema, migrations, the credential engine, the lint ruleset
+                       and INVARIANTS.md all live there.
 
 apps/registry          @h-hallows/registry — the operator console
   app/(app)/today      ranked work queue — seven buckets (§ 5)

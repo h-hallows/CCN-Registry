@@ -3,9 +3,8 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "CCN Registry OS \u2014 the internal operator console, and @h-hallows/core, which owns the database. The public platform is a separate repository.",
+  "description": "CCN Registry OS \u2014 the internal operator console. Schema and domain live in @h-hallows/core; the public platform is a separate repository.",
   "workspaces": [
-    "packages/*",
     "apps/*"
   ],
   "scripts": {
@@ -16,13 +15,13 @@
     "test": "npm run test --workspaces --if-present",
     "lint:copy": "npm run lint:copy --workspaces --if-present",
     "ci": "npm run lint:copy && npm run typecheck && npm run test",
-    "db:deploy": "npm run db:deploy --workspace=@h-hallows/core",
-    "db:migrate": "npm run db:migrate --workspace=@h-hallows/core",
-    "db:reset": "npm run db:reset --workspace=@h-hallows/core",
-    "db:seed": "npm run db:seed --workspace=@h-hallows/core",
     "db:up": "docker compose up -d && node scripts/wait-for-pg.mjs",
     "db:down": "docker compose down",
-    "build:registry": "npm run build --workspace=@h-hallows/registry"
+    "build:registry": "npm run build --workspace=@h-hallows/registry",
+    "db:deploy": "npm run db:deploy --workspace=@h-hallows/registry",
+    "db:migrate": "npm run db:migrate --workspace=@h-hallows/registry",
+    "db:reset": "npm run db:reset --workspace=@h-hallows/registry",
+    "db:seed": "npm run db:seed --workspace=@h-hallows/registry"
   },
   "devDependencies": {
     "typescript": "^5.7.3"
