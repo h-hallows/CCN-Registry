@@ -54,3 +54,30 @@ jobs:
             exit 1
           fi
           echo "ok: migrations and drizzle-kit live only in packages/core"
+
+  # § 1812.533(c): a record of every advertisement, with date and publication, kept one
+  # year. A website is an advertisement and it changes every deploy, so this is written
+  # from CI — a manual log would not be kept, and a partial one is worse than none
+  # because it implies the rest are reliable.
+  record-advertisement:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Record this deploy as an advertisement
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "No DATABASE_URL secret; skipping. Set it so the § 1812.533(c) log is kept."
+            exit 0
+          fi
+          npx tsx scripts/record-advertisement.mjs \
+            --publication website --reference "$GITHUB_SHA" --recorded-by ci

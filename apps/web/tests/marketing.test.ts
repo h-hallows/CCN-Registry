@@ -175,3 +175,46 @@ describe('§ 11 — structured data claims nothing clinical', () => {
     expect(config).toContain('noindex, nofollow, noarchive');
   });
 });
+
+describe('W4 — robots, sitemap and the advertising record', () => {
+  it('allows the marketing pages and disallows every portal', async () => {
+    const { default: robots } = await import('@/app/robots');
+    const rules = robots().rules;
+    const rule = Array.isArray(rules) ? rules[0]! : rules;
+    expect(rule.allow).toBe('/');
+    for (const path of ['/portal', '/pro', '/partner', '/invite', '/api']) {
+      expect(rule.disallow, `${path} is crawlable`).toContain(path);
+    }
+  });
+
+  it('lists only the marketing routes in the sitemap', async () => {
+    const { default: sitemap } = await import('@/app/sitemap');
+    const urls = sitemap().map((e) => new URL(e.url).pathname);
+    expect(urls).toContain('/');
+    expect(urls).toContain('/pricing');
+    for (const portal of ['/portal', '/pro', '/partner', '/invite']) {
+      expect(urls.some((u) => u.startsWith(portal)), `${portal} is in the sitemap`).toBe(false);
+    }
+  });
+
+  it('emits absolute canonical URLs, not ones resolved against a preview host', async () => {
+    const layout = read(join(ROOT, 'app/layout.tsx'));
+    expect(layout).toContain('metadataBase');
+  });
+
+  it('claims no licensure, accreditation or award in metadata', () => {
+    for (const file of allSource) {
+      const src = code(file);
+      for (const banned of ['accreditation', 'hasCredential', 'award:', 'license:']) {
+        expect(src, `${rel(file)} claims ${banned}`).not.toContain(banned);
+      }
+    }
+  });
+
+  it('has a recorder CI can run, which never fails a deploy', () => {
+    const script = readFileSync(join(ROOT, '../../scripts/record-advertisement.mjs'), 'utf8');
+    expect(script).toContain('advertising_log');
+    // § 1812.533(c) bookkeeping must not be able to block a release.
+    expect(script).toContain('exit(0)');
+  });
+});

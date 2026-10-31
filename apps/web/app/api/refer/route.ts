@@ -1,29 +1,50 @@
 /**
- * Architecture spec § 6.1 — the partner referral form, which needs no account.
+ * The partner referral form. No account needed for a first referral — spec § 11.
  *
- * Writes to `inquiries` with `partner_id` set, so a partner's first referral is as easy
- * as a phone call and still lands as an attributable record.
+ * Writes to `inquiries` with the partner block in `referrer`. The person we will call
+ * is the family contact; the partner's own details are recorded so the acknowledgement
+ * can reach a named person.
  */
 import type { NextRequest } from 'next/server';
-import { z } from 'zod';
-import { inquirySchema, recordInquiry } from '@/lib/intake';
-import { readForm, accepted, rejected, failed } from '@/lib/intakeResponse';
+import { PartnerReferralSchema } from '@/lib/schemas/intake';
+import { recordPartnerReferral } from '@/lib/intake';
+import { rateLimit } from '@/lib/rateLimit';
+import { notifyOperator } from '@/lib/notify';
+import { accepted, failed, limited, readBody, rejected, silentlyDropped } from '@/lib/intakeResponse';
 
 export const dynamic = 'force-dynamic';
 
-const partnerReferralSchema = inquirySchema.innerType().extend({
-  partnerId: z.string().uuid('That referral link is not valid.'),
-});
-
 export async function POST(request: NextRequest): Promise<Response> {
-  const parsed = partnerReferralSchema.safeParse(await readForm(request));
-  if (!parsed.success) return rejected(parsed.error);
+  if (await rateLimit(request, { key: 'refer', max: 10, windowSec: 600 })) return limited();
 
+  const parsed = PartnerReferralSchema.safeParse(await readBody(request));
+  if (!parsed.success) return rejected(parsed.error);
+  if (parsed.data.honeypot) return silentlyDropped();
+
+  let reference: string;
   try {
-    await recordInquiry(parsed.data);
+    reference = await recordPartnerReferral(parsed.data);
   } catch (err) {
     console.error('[refer] could not record', err);
     return failed();
   }
-  return accepted('Received. We will call them today.');
+
+  await notifyOperator({
+    kind: 'partner_referral',
+    urgency: parsed.data.urgency,
+    subject: `Partner referral (${parsed.data.urgency.replace('_', ' ')})`,
+    body: 'A referral has arrived from a partner. Open the console to see it.',
+    payload: {
+      inquiryId: reference,
+      partnerRole: parsed.data.partnerRole,
+      urgency: parsed.data.urgency,
+    },
+  });
+
+  return accepted(
+    parsed.data.urgency === 'discharge' || parsed.data.urgency === 'same_day'
+      ? 'Received. We will call them today and come back to you with who we spoke to.'
+      : 'Received. We will call them and come back to you with who we spoke to.',
+    reference,
+  );
 }

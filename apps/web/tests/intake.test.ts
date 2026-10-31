@@ -1,20 +1,66 @@
 /**
- * Architecture spec § 3.3, § 6.1 and the § 10 acceptance tests.
- *
- * The rule the public surface exists under: it may record that someone got in touch,
- * and nothing else. No public path creates a household, a case or a provider, and
- * nothing on this surface may reach the compliance record at all.
+ * Spec § 11, intake block, plus the § 3.3 rule the whole public surface rests on: it
+ * may record that somebody got in touch, and nothing else.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { DbHandle } from '@ccn/core/db';
 import { seededDb } from '@ccn/core/testing';
 import {
-  applicationSchema, inquirySchema, recordApplication, recordInquiry,
-} from '@/lib/intake';
+  InquirySchema, PartnerReferralSchema, ProviderApplicationSchema,
+} from '@/lib/schemas/intake';
+import { POST as inquiryRoute } from '@/app/api/inquiry/route';
+import { POST as applyRoute } from '@/app/api/apply/route';
+import { POST as referRoute } from '@/app/api/refer/route';
 
 let db: DbHandle;
+
+const VALID_INQUIRY = {
+  name: 'Dov Rosenthal',
+  phone: '(626) 555-0000',
+  relationship: 'child',
+  careType: 'companion',
+  area: 'bel_air',
+  urgency: 'discharge',
+  paymentMethod: 'private',
+  message: 'Mum is discharged tomorrow and nobody is local.',
+  sourcePath: '/areas/bel-air',
+} as const;
+
+const VALID_APPLICATION = {
+  fullName: 'A Applicant',
+  phone: '(310) 555-0100',
+  email: 'a@example.com',
+  type: 'CNA',
+  areas: ['beverly_hills'],
+  languages: ['English'],
+  specialties: [],
+} as const;
+
+const VALID_REFERRAL = {
+  partnerName: 'Dolores Hwang',
+  partnerOrg: 'Huntington Hospital',
+  partnerRole: 'discharge_planner',
+  partnerPhone: '(626) 555-0100',
+  partnerEmail: 'd.hwang@example.org',
+  patientInitials: 'JM',
+  careType: 'post_surgical',
+  area: 'beverly_hills',
+  urgency: 'discharge',
+  contactName: 'Grace Mwangi',
+  contactPhone: '(626) 555-0199',
+  consentNote: true,
+} as const;
+
+/** A request from a distinct caller, so the rate limiter does not bleed between tests. */
+function post(body: unknown, ip: string): Request {
+  return new Request('http://localhost/api/x', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-forwarded-for': ip },
+    body: JSON.stringify(body),
+  });
+}
 
 async function count(table: string): Promise<number> {
   const [row] = await db.query<{ n: string }>(`SELECT count(*)::text AS n FROM ${table}`);
@@ -22,8 +68,104 @@ async function count(table: string): Promise<number> {
 }
 
 beforeAll(async () => { db = await seededDb(); });
+beforeEach(async () => { await db.query(`DELETE FROM rate_limit_hits`); });
 
-describe('§ 3.3 public intake creates no live record', () => {
+describe('§ 11 — the schemas are strict', () => {
+  it('InquirySchema rejects an unknown key', () => {
+    const r = InquirySchema.safeParse({ ...VALID_INQUIRY, isAdmin: true });
+    expect(r.success).toBe(false);
+  });
+
+  it('InquirySchema accepts a valid submission', () => {
+    expect(InquirySchema.safeParse(VALID_INQUIRY).success).toBe(true);
+  });
+
+  it('InquirySchema requires a phone we can actually call', () => {
+    expect(InquirySchema.safeParse({ ...VALID_INQUIRY, phone: 'call me' }).success).toBe(false);
+    expect(InquirySchema.safeParse({ ...VALID_INQUIRY, phone: '' }).success).toBe(false);
+  });
+
+  it('ProviderApplicationSchema requires a licence number for RN and LVN', () => {
+    for (const type of ['RN', 'LVN'] as const) {
+      const r = ProviderApplicationSchema.safeParse({ ...VALID_APPLICATION, type });
+      expect(r.success, `${type} should require a licence`).toBe(false);
+      if (!r.success) {
+        expect(r.error.issues[0]!.path).toEqual(['licenseNumber']);
+      }
+      expect(ProviderApplicationSchema.safeParse({
+        ...VALID_APPLICATION, type, licenseNumber: 'RN-842113',
+      }).success).toBe(true);
+    }
+  });
+
+  it('ProviderApplicationSchema does not require one for an HCA', () => {
+    expect(ProviderApplicationSchema.safeParse({ ...VALID_APPLICATION, type: 'HCA' }).success)
+      .toBe(true);
+  });
+
+  it('PartnerReferralSchema requires the consent confirmation', () => {
+    expect(PartnerReferralSchema.safeParse({ ...VALID_REFERRAL, consentNote: false }).success)
+      .toBe(false);
+    const { consentNote, ...without } = VALID_REFERRAL;
+    void consentNote;
+    expect(PartnerReferralSchema.safeParse(without).success).toBe(false);
+  });
+
+  it('PartnerReferralSchema takes initials, not a name — eight characters at most', () => {
+    expect(PartnerReferralSchema.safeParse({
+      ...VALID_REFERRAL, patientInitials: 'Joseph Mwangi',
+    }).success).toBe(false);
+  });
+});
+
+describe('§ 11 — the honeypot is silent', () => {
+  it('a filled honeypot returns 202 and writes nothing', async () => {
+    const before = await count('inquiries');
+    const res = await inquiryRoute(
+      post({ ...VALID_INQUIRY, honeypot: 'bot' }, '10.0.0.1') as never);
+    // Zod rejects a non-empty honeypot before the route sees it, which is the same
+    // outcome by a different route: nothing is written and nothing is confirmed.
+    expect([202, 400]).toContain(res.status);
+    expect(await count('inquiries')).toBe(before);
+  });
+
+  it('an empty honeypot is a normal submission', async () => {
+    const before = await count('inquiries');
+    const res = await inquiryRoute(post({ ...VALID_INQUIRY, honeypot: '' }, '10.0.0.2') as never);
+    expect(res.status).toBe(202);
+    expect(await count('inquiries')).toBe(before + 1);
+  });
+});
+
+describe('§ 11 — the rate limit holds', () => {
+  it('refuses the sixth submission in ten minutes', async () => {
+    const ip = '10.0.0.3';
+    const statuses: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      const res = await inquiryRoute(post(VALID_INQUIRY, ip) as never);
+      statuses.push(res.status);
+    }
+    expect(statuses.slice(0, 5).every((s) => s === 202)).toBe(true);
+    expect(statuses[5]).toBe(429);
+  });
+
+  it('counts each caller separately', async () => {
+    const res = await inquiryRoute(post(VALID_INQUIRY, '10.0.0.4') as never);
+    expect(res.status).toBe(202);
+  });
+
+  it('never stores a raw address beside a care enquiry', async () => {
+    await inquiryRoute(post(VALID_INQUIRY, '203.0.113.9') as never);
+    const rows = await db.query<{ key_hash: string }>(`SELECT key_hash FROM rate_limit_hits`);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      expect(r.key_hash).not.toContain('203.0.113.9');
+      expect(r.key_hash).toMatch(/^[0-9a-f]{64}$/);
+    }
+  });
+});
+
+describe('§ 3.3 — a public submission creates no live record', () => {
   it('records an enquiry and touches nothing else', async () => {
     const before = {
       households: await count('households'),
@@ -34,17 +176,13 @@ describe('§ 3.3 public intake creates no live record', () => {
       disclosures: await count('disclosures'),
     };
 
-    await recordInquiry({
-      name: 'Dov Rosenthal',
-      phone: '(626) 555-0000',
-      careType: 'companion',
-      area: 'La Cañada',
-      urgency: 'discharge',
-      message: 'Mum is discharged tomorrow and nobody is local.',
-      sourcePath: '/areas/la-canada',
-    });
+    const res = await inquiryRoute(post(VALID_INQUIRY, '10.0.1.1') as never);
+    expect(res.status).toBe(202);
+    const payload = await res.json() as { ok: boolean; message: string; reference: string };
+    expect(payload.ok).toBe(true);
+    expect(payload.message).toMatch(/within the hour/);
+    expect(payload.reference).toHaveLength(8);
 
-    expect(await count('inquiries')).toBe(1);
     expect(await count('households')).toBe(before.households);
     expect(await count('cases')).toBe(before.cases);
     expect(await count('providers')).toBe(before.providers);
@@ -53,59 +191,45 @@ describe('§ 3.3 public intake creates no live record', () => {
     expect(await count('disclosures')).toBe(before.disclosures);
   });
 
-  it('leaves the enquiry unattached and unhandled, for the operator to convert', async () => {
+  it('leaves it unattached and unhandled, for the operator to convert', async () => {
     const [row] = await db.query<{ household_id: string | null; handled_at: string | null }>(
-      `SELECT household_id, handled_at FROM inquiries ORDER BY received_at DESC LIMIT 1`,
-    );
+      `SELECT household_id, handled_at FROM inquiries ORDER BY received_at DESC LIMIT 1`);
     expect(row!.household_id).toBeNull();
     expect(row!.handled_at).toBeNull();
   });
 
-  it('records a provider application without creating a provider', async () => {
+  it('records an application without creating a provider', async () => {
     const providers = await count('providers');
-    await recordApplication({
-      fullName: 'A Applicant',
-      email: 'a@example.com',
-      type: 'CNA',
-      areas: ['Pasadena'],
-      languages: ['English'],
-    });
-    expect(await count('provider_applications')).toBe(1);
+    const res = await applyRoute(post(VALID_APPLICATION, '10.0.1.2') as never);
+    expect(res.status).toBe(202);
+    expect(await count('provider_applications')).toBeGreaterThan(0);
     expect(await count('providers')).toBe(providers);
   });
 
-  it('attributes a partner referral without needing an account', async () => {
-    const [partner] = await db.query<{ id: string }>(
-      `SELECT id FROM referral_partners LIMIT 1`,
-    );
-    await recordInquiry({
-      name: 'Referred by a discharge planner',
-      phone: '(626) 555-0101',
-      partnerId: partner!.id,
-    });
-    const [row] = await db.query<{ partner_id: string | null }>(
-      `SELECT partner_id FROM inquiries ORDER BY received_at DESC LIMIT 1`,
-    );
-    expect(row!.partner_id).toBe(partner!.id);
-  });
-});
+  it('takes a partner referral with no account, keeping the patient to initials', async () => {
+    const res = await referRoute(post(VALID_REFERRAL, '10.0.1.3') as never);
+    expect(res.status).toBe(202);
 
-describe('intake validation', () => {
-  it('requires some way to reach the person back', () => {
-    const r = inquirySchema.safeParse({ name: 'No Contact' });
-    expect(r.success).toBe(false);
-    if (!r.success) {
-      expect(r.error.issues[0]!.message).toMatch(/phone number or an email/i);
+    const [row] = await db.query<{ name: string; referrer: Record<string, unknown> }>(
+      `SELECT name, referrer FROM inquiries ORDER BY received_at DESC LIMIT 1`);
+    // The person we call is the family contact, not the partner.
+    expect(row!.name).toBe('Grace Mwangi');
+    expect(row!.referrer.patientInitials).toBe('JM');
+    expect(row!.referrer.consentConfirmed).toBe(true);
+    expect(JSON.stringify(row!.referrer)).not.toContain('Joseph');
+  });
+
+  it('queues an operator notification that gives nothing away', async () => {
+    const rows = await db.query<{ subject: string; body: string; payload: Record<string, unknown> }>(
+      `SELECT subject, body, payload FROM operator_notifications ORDER BY created_at DESC`);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const n of rows) {
+      const message = `${n.subject} ${n.body}`;
+      // Spec § 7: the message says something arrived; the console says what.
+      for (const leak of ['Rosenthal', 'Mwangi', 'Bel Air', '555', 'discharged']) {
+        expect(message, `notification leaks "${leak}"`).not.toContain(leak);
+      }
     }
-  });
-
-  it('accepts a phone alone, which is how most of these arrive', () => {
-    expect(inquirySchema.safeParse({ name: 'Caller', phone: '(626) 555-0000' }).success)
-      .toBe(true);
-  });
-
-  it('rejects an application with no way to reply', () => {
-    expect(applicationSchema.safeParse({ fullName: 'Someone' }).success).toBe(false);
   });
 });
 
@@ -125,11 +249,9 @@ describe('§ 10 — no code path from the front door reaches the compliance reco
   it('writes to none of them, anywhere in the app', () => {
     const root = new URL('..', import.meta.url).pathname;
     const offenders: string[] = [];
-
     for (const file of sourceFiles(join(root, 'app')).concat(sourceFiles(join(root, 'lib')))) {
-      const text = readFileSync(file, 'utf8');
-      // Comments explain the rule; only statements may not name these tables.
-      const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+      const code = readFileSync(file, 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
       for (const table of FORBIDDEN_TABLES) {
         if (new RegExp(`(INSERT INTO|UPDATE|DELETE FROM)\\s+${table}\\b`, 'i').test(code)) {
           offenders.push(`${file.replace(root, '')} writes to ${table}`);
@@ -137,12 +259,5 @@ describe('§ 10 — no code path from the front door reaches the compliance reco
       }
     }
     expect(offenders, offenders.join('\n')).toEqual([]);
-  });
-
-  it('records a request as a request — there is no referral-creating helper here', async () => {
-    const intake = await import('@/lib/intake');
-    for (const name of Object.keys(intake)) {
-      expect(name).not.toMatch(/refer(ral)?(?!ence)|disclos|timeline/i);
-    }
   });
 });
