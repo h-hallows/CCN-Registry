@@ -10,7 +10,7 @@
  * their rate and it stays negotiable with the household (I5). A single number would
  * read as a price list, which this is not.
  */
-import { getDb } from '@ccn/core/db';
+import { getDb } from '@h-hallows/core/db';
 
 export const RATE_REVALIDATE_SECONDS = 3600;
 

@@ -8,8 +8,8 @@
  * reason.
  */
 import { beforeAll, describe, expect, it } from 'vitest';
-import type { DbHandle } from '@ccn/core/db';
-import { seededDb } from '@ccn/core/testing';
+import type { DbHandle } from '@h-hallows/core/db';
+import { seededDb } from '@h-hallows/core/testing';
 import { benchProvider, currentBenches } from '@/lib/portal';
 import type { PortalSession } from '@/lib/session';
 

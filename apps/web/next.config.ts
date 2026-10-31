@@ -3,7 +3,7 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   typescript: { ignoreBuildErrors: false },
   serverExternalPackages: ['@electric-sql/pglite', 'pg'],
-  transpilePackages: ['@ccn/core'],
+  transpilePackages: ['@h-hallows/core'],
 
   /**
    * Architecture spec § 6.2 and § 7. The marketing routes are indexable; the three

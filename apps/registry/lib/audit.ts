@@ -9,7 +9,7 @@
  * Retention is currently unbounded — set a policy once counsel answers the HIPAA
  * question (COUNSEL.md question 4).
  */
-import { getDb } from '@ccn/core/db';
+import { getDb } from '@h-hallows/core/db';
 
 export type AuditAction = 'read' | 'create' | 'update' | 'soft_delete';
 

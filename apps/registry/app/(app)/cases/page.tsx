@@ -4,7 +4,7 @@ import { URGENCY_LABEL } from '@/lib/domain/buckets';
 import {
   CARE_LABEL, Empty, RowLink, Section, shortDate, STATUS_LABEL,
 } from '@/components/ui';
-import type { CaseStatusValue } from '@ccn/core/schema';
+import type { CaseStatusValue } from '@h-hallows/core/schema';
 
 export const dynamic = 'force-dynamic';
 

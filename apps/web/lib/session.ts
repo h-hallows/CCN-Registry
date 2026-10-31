@@ -12,7 +12,7 @@
  */
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { cookies } from 'next/headers';
-import { getDb } from '@ccn/core/db';
+import { getDb } from '@h-hallows/core/db';
 
 export const PORTAL_COOKIE = 'ccn_portal';
 const SESSION_TTL_DAYS = 14;

@@ -10,7 +10,7 @@
  * No mail provider is wired yet. The row is written regardless, because a notification
  * that exists only as a log line is one that was never sent.
  */
-import { getDb } from '@ccn/core/db';
+import { getDb } from '@h-hallows/core/db';
 
 export type NotificationKind =
   | 'inquiry' | 'provider_application' | 'partner_referral' | 'shortlist_request'

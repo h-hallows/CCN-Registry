@@ -1,10 +1,10 @@
 import { notFound } from 'next/navigation';
-import type { CareType } from '@ccn/core/schema';
+import type { CareType } from '@h-hallows/core/schema';
 import { requireOperator } from '@/lib/operator';
 import { asDate, asTimestamp, getProviderWithStanding } from '@/lib/queries/providers';
-import { getDb } from '@ccn/core/db';
-import { LABEL, requiredFor } from '@ccn/core/domain';
-import { civilLA, formatISODate } from '@ccn/core/domain';
+import { getDb } from '@h-hallows/core/db';
+import { LABEL, requiredFor } from '@h-hallows/core/domain';
+import { civilLA, formatISODate } from '@h-hallows/core/domain';
 import { setReferralStatusAction, upsertCredentialAction } from '@/app/(app)/actions';
 import { ActionForm, Disclose } from '@/components/ActionForm';
 import {

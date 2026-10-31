@@ -10,7 +10,7 @@
  * container, so an in-memory counter would reset constantly and limit nothing.
  */
 import { createHash } from 'node:crypto';
-import { getDb } from '@ccn/core/db';
+import { getDb } from '@h-hallows/core/db';
 
 export interface RateLimitOptions {
   key: string;

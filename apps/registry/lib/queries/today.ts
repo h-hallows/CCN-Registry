@@ -7,14 +7,14 @@
  * The § 5 "coverage gaps in the next 7 days" bucket is absent: the scheduling and
  * coverage surface is blocked by the § 0.5 nine-factor audit. See /DEFERRED.md.
  */
-import { getDb } from '@ccn/core/db';
+import { getDb } from '@h-hallows/core/db';
 import { auditRead, type AuditContext } from '@/lib/audit';
 import { buildToday, THIN_BENCH_TARGET, type Today, type TodayInput } from '@/lib/domain/buckets';
-import { LABEL, SEVERITY, requiredFor, type CredStatus } from '@ccn/core/domain';
+import { LABEL, SEVERITY, requiredFor, type CredStatus } from '@h-hallows/core/domain';
 import { SKILLED_CARE_TYPES } from '@/lib/domain/referral';
 import { listProvidersWithStanding } from './providers';
 import { asDate, asTimestamp } from './providers';
-import type { CareType, UrgencyValue } from '@ccn/core/schema';
+import type { CareType, UrgencyValue } from '@h-hallows/core/schema';
 
 const ALERT_STATUSES: CredStatus[] = ['expired', 'critical', 'soon', 'upcoming'];
 

@@ -2,15 +2,15 @@
  * Provider and credential reads/writes. Eligibility is computed here, in the query
  * layer, never in a component (I12).
  */
-import { getDb } from '@ccn/core/db';
+import { getDb } from '@h-hallows/core/db';
 import { audit, auditRead, diffOf, type AuditContext } from '@/lib/audit';
 import {
   credStatus, eligibility, LABEL, needsReverification, requiredFor,
   type CredentialLike, type CredStatus, type Eligibility,
-} from '@ccn/core/domain';
-import { asISODate } from '@ccn/core/domain';
+} from '@h-hallows/core/domain';
+import { asISODate } from '@h-hallows/core/domain';
 import { emit } from '@/lib/metrics';
-import type { CredentialType, ProviderType } from '@ccn/core/schema';
+import type { CredentialType, ProviderType } from '@h-hallows/core/schema';
 
 export interface ProviderRow {
   id: string;

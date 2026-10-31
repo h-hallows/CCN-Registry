@@ -1,12 +1,12 @@
 /** Household and case reads. Every function that returns identifiable data audits the read. */
-import { getDb } from '@ccn/core/db';
+import { getDb } from '@h-hallows/core/db';
 import { audit, auditRead, type AuditContext } from '@/lib/audit';
 import { asDate, asTimestamp } from './providers';
 import { emit } from '@/lib/metrics';
 import { insertTimeline } from '@/lib/domain/referral';
 import type {
   CareType, CaseStatusValue, EndReasonValue, UrgencyValue,
-} from '@ccn/core/schema';
+} from '@h-hallows/core/schema';
 
 export interface CaseListRow {
   id: string;

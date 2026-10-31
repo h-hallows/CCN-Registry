@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { requireOperator } from '@/lib/operator';
 import { getCompliance } from '@/lib/queries/compliance';
-import { LABEL, REVERIFY_AFTER_DAYS } from '@ccn/core/domain';
+import { LABEL, REVERIFY_AFTER_DAYS } from '@h-hallows/core/domain';
 import { dueWording } from '@/lib/domain/buckets';
 import {
   CredentialPill, Empty, RowLink, Section, shortDate, shortDateTime,

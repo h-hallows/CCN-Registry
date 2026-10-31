@@ -14,19 +14,19 @@
  * channel. If counsel later allows a recorded or interactive voice disclosure, that is a
  * schema change plus a review, not a config flag.
  */
-import type { Tx } from '@ccn/core/db';
-import { getDb } from '@ccn/core/db';
+import type { Tx } from '@h-hallows/core/db';
+import { getDb } from '@h-hallows/core/db';
 import { emit } from '@/lib/metrics';
-import { asISODate, civilLA, eligibility, formatISODate, writtenStatementDueOn } from '@ccn/core/domain';
-import type { CredentialLike } from '@ccn/core/domain';
+import { asISODate, civilLA, eligibility, formatISODate, writtenStatementDueOn } from '@h-hallows/core/domain';
+import type { CredentialLike } from '@h-hallows/core/domain';
 
 /**
  * Which care types are private duty nursing under Civil Code § 1812.524. Defined in
- * @ccn/core because the front door has to apply the same test — an intake form that
+ * @h-hallows/core because the front door has to apply the same test — an intake form that
  * disagrees about what counts as skilled is an intake form that collects the wrong
  * record. Re-exported so existing imports in this app keep working.
  */
-import { SKILLED, isSkilled } from '@ccn/core/domain';
+import { SKILLED, isSkilled } from '@h-hallows/core/domain';
 export { SKILLED as SKILLED_CARE_TYPES, isSkilled };
 
 export interface MakeReferralInput {

@@ -5,8 +5,8 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { DbHandle } from '@ccn/core/db';
-import { seededDb } from '@ccn/core/testing';
+import type { DbHandle } from '@h-hallows/core/db';
+import { seededDb } from '@h-hallows/core/testing';
 import {
   InquirySchema, PartnerReferralSchema, ProviderApplicationSchema,
 } from '@/lib/schemas/intake';

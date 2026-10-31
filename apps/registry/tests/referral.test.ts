@@ -2,14 +2,14 @@
  * Invariants that live in the console rather than in the schema.
  *
  * The database-level half of this — append-only triggers, check constraints, enum
- * membership, the physician trigger — is in @ccn/core's own suite, so it cannot be
+ * membership, the physician trigger — is in @h-hallows/core's own suite, so it cannot be
  * weakened in one app without the other noticing. What is here is the behaviour of the
  * code that writes through those constraints: the referral transaction, and the query
  * layer that must never hand an ineligible provider to the UI.
  */
 import { beforeAll, describe, expect, it } from 'vitest';
-import type { DbHandle } from '@ccn/core/db';
-import { caseIdWhere, expectRejection, providerIdByName, seededDb, TEST_CTX } from '@ccn/core/testing';
+import type { DbHandle } from '@h-hallows/core/db';
+import { caseIdWhere, expectRejection, providerIdByName, seededDb, TEST_CTX } from '@h-hallows/core/testing';
 import { makeReferral, ReferralError } from '@/lib/domain/referral';
 import { shortlistFor } from '@/lib/queries/match';
 

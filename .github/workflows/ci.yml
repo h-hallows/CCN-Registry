@@ -16,7 +16,7 @@ jobs:
           node-version: '22'
           cache: npm
 
-      # Installs every workspace and links @ccn/core, so the console builds against the
+      # Installs every workspace and links @h-hallows/core, so the console builds against the
       # library source rather than a published copy.
       - run: npm ci
 
@@ -33,7 +33,7 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      # The schema invariants live in @ccn/core so they cannot be weakened in one app
+      # The schema invariants live in @h-hallows/core so they cannot be weakened in one app
       # without the other noticing. They run against an in-memory Postgres with the real
       # migrations applied, so the triggers and constraints are exercised, not mocked.
       - name: Tests, including the invariant gate
@@ -51,12 +51,12 @@ jobs:
         run: |
           set -e
           if find apps -type d -name 'migrations' | grep -q .; then
-            echo "An app contains a migrations directory. Migrations belong to @ccn/core."
+            echo "An app contains a migrations directory. Migrations belong to @h-hallows/core."
             find apps -type d -name 'migrations'
             exit 1
           fi
           if grep -rl '"drizzle-kit"' apps/*/package.json 2>/dev/null | grep -q .; then
-            echo "An app depends on drizzle-kit. Only @ccn/core may generate migrations."
+            echo "An app depends on drizzle-kit. Only @h-hallows/core may generate migrations."
             exit 1
           fi
           echo "ok: migrations and drizzle-kit live only in packages/core"

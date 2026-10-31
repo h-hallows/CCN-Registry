@@ -9,14 +9,14 @@
  * but an excluded entry carries only an id, a name and the reason. No profile, no rate,
  * no credential detail, and never a Live Scan result (COUNSEL.md question 5).
  */
-import { getDb } from '@ccn/core/db';
+import { getDb } from '@h-hallows/core/db';
 import { auditRead, type AuditContext } from '@/lib/audit';
 import {
   compareEligible, screen, type Candidate, type Exclusion, type MatchSignals,
-} from '@ccn/core/domain';
+} from '@h-hallows/core/domain';
 import { emit } from '@/lib/metrics';
 import { asDate } from './providers';
-import type { CareType, ProviderType } from '@ccn/core/schema';
+import type { CareType, ProviderType } from '@h-hallows/core/schema';
 
 export interface ShortlistEntry {
   providerId: string;

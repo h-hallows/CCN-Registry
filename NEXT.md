@@ -11,12 +11,12 @@ In substance it is already done, as a workspace rather than a separate repositor
 | `ccn-core` owns schema, domain, lint, migrations, INVARIANTS.md | `packages/core` — all of it |
 | exports map for `.`, `./schema`, `./domain`, `./lint`, a `ccn-lint` bin | present |
 | `drizzle-orm` as a peer dependency, TS source with no build step | present |
-| apps pin an exact version, never a caret | `"@ccn/core": "0.1.0"` in both |
-| `transpilePackages: ['@ccn/core']` | both apps |
+| apps pin an exact version, never a caret | `"@h-hallows/core": "0.1.0"` in both |
+| `transpilePackages: ['@h-hallows/core']` | both apps |
 | no `drizzle-kit` or `migrations/` in any app | enforced by a CI job |
 | no local copy of `eligibility()`, `credStatus()`, `addBusinessDays()` | neither app has one |
 
-**What is NOT done, and cannot be here:** publishing `@ccn/core` to GitHub Packages as
+**What is NOT done, and cannot be here:** publishing `@h-hallows/core` to GitHub Packages as
 its own repository. That needs a token with `write:packages`, two new repositories, and a
 read-only `GITHUB_PACKAGES_TOKEN` on both Vercel projects. All four are account-level
 actions.
@@ -27,7 +27,7 @@ plus a publish rather than a refactor. `ARCHITECTURE.md` has the steps.
 **One thing to add at the split.** Architecture spec § 10's fifth acceptance test —
 "eligibility() imported in both apps returns identical results for the same fixture" —
 cannot run across repositories, and exact pinning is the very mechanism that lets the
-two apps drift. Add a CI check that both apps pin the *same* `@ccn/core` version.
+two apps drift. Add a CI check that both apps pin the *same* `@h-hallows/core` version.
 
 ## Built ahead of the stated sequence
 
@@ -42,7 +42,7 @@ Treat W3–W5 as needing review against § 4.5 rather than as settled.
 ## ccn-web now exists twice, and that is temporary
 
 `apps/web` here was split into **h-hallows/CCN-external** with its history intact. That
-repository cannot `npm install` until `@ccn/core` is published, so for now:
+repository cannot `npm install` until `@h-hallows/core` is published, so for now:
 
 - **`apps/web` in this workspace is authoritative.** It is the copy CI builds and tests
   against the live core.
@@ -50,7 +50,7 @@ repository cannot `npm install` until `@ccn/core` is published, so for now:
 
 Two editable copies of a codebase whose whole point is one implementation of
 `eligibility()` is precisely the failure mode the hard stops exist to prevent, so this
-state should be short. It ends when `@ccn/core@0.1.0` is published to GitHub Packages
+state should be short. It ends when `@h-hallows/core@0.1.0` is published to GitHub Packages
 and `apps/web` is deleted from here — at which point this workspace holds `packages/core`
 and `apps/registry` only.
 
@@ -67,6 +67,6 @@ and `apps/registry` only.
 | A Postgres for the console | The live deployment, which still reports `not_configured` | Operator |
 | Vercel Root Directory → `apps/registry` | Merging `restructure/workspaces` | Operator |
 | One week of tallies | Nothing technical — it decides what gets funded next | Operator |
-| A `write:packages` token, and a read-only `GITHUB_PACKAGES_TOKEN` on both Vercel projects | Publishing `@ccn/core`, which is what ends the duplicated `ccn-web` above | Operator |
+| A `write:packages` token, and a read-only `GITHUB_PACKAGES_TOKEN` on both Vercel projects | Publishing `@h-hallows/core`, which is what ends the duplicated `ccn-web` above | Operator |
 
 No domain has been purchased. No wordmark has been drawn.

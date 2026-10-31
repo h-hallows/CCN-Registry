@@ -4,10 +4,10 @@
  * the code path is one call, so what this test pins down is that one call is enough.
  */
 import { beforeAll, describe, expect, it } from 'vitest';
-import type { DbHandle } from '@ccn/core/db';
+import type { DbHandle } from '@h-hallows/core/db';
 import { getProviderWithStanding, upsertCredential } from '@/lib/queries/providers';
-import { providerIdByName, seededDb, TEST_CTX } from '@ccn/core/testing';
-import { addDays, civilLA, formatISODate } from '@ccn/core/domain';
+import { providerIdByName, seededDb, TEST_CTX } from '@h-hallows/core/testing';
+import { addDays, civilLA, formatISODate } from '@h-hallows/core/domain';
 
 let db: DbHandle;
 const d = (n: number) => formatISODate(addDays(civilLA(new Date()), n));

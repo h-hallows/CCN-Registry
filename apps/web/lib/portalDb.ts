@@ -16,7 +16,7 @@
  * Both are LOCAL, so they end with the transaction and cannot leak into the next
  * request through a pooled connection.
  */
-import { getDb, type Tx } from '@ccn/core/db';
+import { getDb, type Tx } from '@h-hallows/core/db';
 import { claimsFor, type PortalSession } from './session';
 
 export async function asPortalUser<T>(
@@ -47,7 +47,7 @@ export async function asPortalUser<T>(
  *
  * The alternative would be a SECURITY DEFINER function computing eligibility in SQL,
  * which means a second implementation of the per-type matrix — the exact drift
- * @ccn/core exists to prevent.
+ * @h-hallows/core exists to prevent.
  *
  * Use it for nothing else. Every query that returns data the household owns goes
  * through `asPortalUser`, where the policies decide.

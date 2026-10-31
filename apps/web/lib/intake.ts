@@ -10,7 +10,7 @@
  * asserts it statically, and in deployment the web project's database role does not
  * hold the privilege either (architecture spec § 4).
  */
-import { getDb } from '@ccn/core/db';
+import { getDb } from '@h-hallows/core/db';
 import type {
   InquiryInput, PartnerReferralInput, ProviderApplicationInput,
 } from './schemas/intake';

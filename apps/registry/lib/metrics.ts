@@ -18,8 +18,8 @@
  *    shifting hours to a direct hire while keeping the registry for fill-in. See
  *    `recordMonthHours`.
  */
-import { getDb, type Tx } from '@ccn/core/db';
-import { formatISODate, civilLA, startOfMonth } from '@ccn/core/domain';
+import { getDb, type Tx } from '@h-hallows/core/db';
+import { formatISODate, civilLA, startOfMonth } from '@h-hallows/core/domain';
 
 export type MetricName =
   | 'inquiry_received' | 'first_contact' | 'shortlist_generated' | 'referral_made'

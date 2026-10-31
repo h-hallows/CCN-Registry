@@ -1,9 +1,9 @@
 /** Compliance screen. Spec § 5 and § 7 (M7). */
-import { getDb } from '@ccn/core/db';
+import { getDb } from '@h-hallows/core/db';
 import { auditRead, type AuditContext } from '@/lib/audit';
-import { SEVERITY, requiredFor, type CredStatus } from '@ccn/core/domain';
+import { SEVERITY, requiredFor, type CredStatus } from '@h-hallows/core/domain';
 import { listProvidersWithStanding, asDate, asTimestamp } from './providers';
-import type { CredentialType } from '@ccn/core/schema';
+import type { CredentialType } from '@h-hallows/core/schema';
 
 export interface CredentialQueueRow {
   providerId: string;

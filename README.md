@@ -61,7 +61,7 @@ An npm workspace. See [ARCHITECTURE.md](ARCHITECTURE.md) for why, and for how it
 into three repositories.
 
 ```
-packages/core          @ccn/core — schema, migrations, pure domain, the lint ruleset
+packages/core          @h-hallows/core — schema, migrations, pure domain, the lint ruleset
   src/schema           Drizzle schema and the types derived from it
   src/domain           credentials, match, businessDays, dates, care — all pure
   src/db               client, migrate, seed
@@ -70,7 +70,7 @@ packages/core          @ccn/core — schema, migrations, pure domain, the lint r
   migrations/          hand-written SQL, append-only
   INVARIANTS.md        one copy; every app links to this file
 
-apps/registry          @ccn/registry — the operator console
+apps/registry          @h-hallows/registry — the operator console
   app/(app)/today      ranked work queue — seven buckets (§ 5)
   app/(app)/roster     roster and the credential vault
   app/(app)/cases      households, cases, append-only timeline
@@ -85,7 +85,7 @@ Commands run from the repository root and delegate to the right workspace:
 ```bash
 npm run dev          # the console
 npm run ci           # lint, typecheck, both test suites
-npm run db:deploy    # apply pending migrations (owned by @ccn/core)
+npm run db:deploy    # apply pending migrations (owned by @h-hallows/core)
 ```
 
 ## Deploying

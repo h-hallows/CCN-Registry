@@ -1,25 +1,28 @@
-# Publishing `@ccn/core`
+# Publishing `@h-hallows/core`
 
 This is the one step that unblocks everything else: splitting `apps/registry` out,
 deleting the duplicated `apps/web`, and the § 4.5 gate in work order 01.
 
 ## The constraint that shapes all of this
 
-**GitHub Packages requires the npm scope to match the repository owner.** Your repos
-are under `h-hallows`, there is no `ccn` organisation, and `ccn` is already taken as a
-GitHub user account — so one cannot be created either. `@ccn/core` cannot be published
-to GitHub Packages as named.
+**GitHub Packages requires the npm scope to match the repository owner.** Your repos are
+under `h-hallows`, there is no `ccn` organisation, and `ccn` is already taken as a
+GitHub user account — so one cannot be created either.
 
-The package is therefore **published** as `@h-hallows/core` and **imported** as
-`@ccn/core`, through an npm alias in each app:
+So the scope is simply `@h-hallows`. The package is `@h-hallows/core`, imported as
+`@h-hallows/core`, with no alias and nothing indirect:
 
 ```jsonc
-"dependencies": { "@ccn/core": "npm:@h-hallows/core@0.1.0" }
+"dependencies": { "@h-hallows/core": "0.1.0" }
 ```
 
-Every `import … from '@ccn/core/domain'` is untouched, the exact pin the specs ask for
-is preserved, and the workspace link still resolves. Verified: 263 tests pass through
-the alias.
+The exact pin the specs ask for is preserved. The two apps are `@h-hallows/registry` and
+`@h-hallows/web`; they are private and never published, but a mixed scope reads as an
+accident.
+
+Where the architecture spec says `@ccn/core`, read `@h-hallows/core`. The spec documents
+under `docs/` are left as written — they are a record of what was specified, not
+configuration.
 
 ## 1. Make the token
 
@@ -41,7 +44,7 @@ npm publish --workspace=@h-hallows/core
 `publishConfig.registry` already points at GitHub Packages, so no `--registry` flag is
 needed. The tarball is 32 files: `src/`, `migrations/` and `INVARIANTS.md`. No build
 step — it ships TypeScript source, which is why both apps set
-`transpilePackages: ['@ccn/core']`.
+`transpilePackages: ['@h-hallows/core']`.
 
 **Then remove the token line from `~/.npmrc`.** It is a write credential sitting in a
 plaintext file read by every npm command you run, including ones in other projects.
@@ -53,7 +56,7 @@ Make a second classic token with **`read:packages` only**. Set it as
 committed `.npmrc` in each app already reads it:
 
 ```
-@ccn:registry=https://npm.pkg.github.com
+@h-hallows:registry=https://npm.pkg.github.com
 //npm.pkg.github.com/:_authToken=${GITHUB_PACKAGES_TOKEN}
 ```
 
@@ -79,7 +82,7 @@ returns identical results for the same fixture"* — cannot run across repositor
 the exact pin, which exists to stop a core change reaching one app before the other, is
 the same mechanism that lets them drift.
 
-Add a CI check asserting both apps pin the **same** `@ccn/core` version. Without it that
+Add a CI check asserting both apps pin the **same** `@h-hallows/core` version. Without it that
 acceptance test can only prove the fixture matches itself.
 
 ## Version discipline

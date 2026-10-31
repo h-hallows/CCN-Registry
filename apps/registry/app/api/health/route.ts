@@ -14,8 +14,8 @@
  * Nothing in here may throw. A health route that 500s tells you only that something is
  * wrong, which is what you already knew.
  */
-import { getDb } from '@ccn/core/db';
-import { ConfigError, describeEnvPresence } from '@ccn/core/env';
+import { getDb } from '@h-hallows/core/db';
+import { ConfigError, describeEnvPresence } from '@h-hallows/core/env';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,7 +38,7 @@ interface Health {
  */
 async function expectedMigrations(): Promise<string[] | null> {
   try {
-    const { migrationFiles } = await import('@ccn/core/db');
+    const { migrationFiles } = await import('@h-hallows/core/db');
     return migrationFiles().map((m) => m.name);
   } catch {
     return null;

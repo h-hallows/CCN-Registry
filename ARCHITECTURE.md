@@ -5,22 +5,22 @@ Built to `docs/ccn-architecture-build-spec.md` v1.0.
 ## Where things are
 
 ```
-packages/core        @ccn/core — owns the database and the rules that must not differ
+packages/core        @h-hallows/core — owns the database and the rules that must not differ
                      between surfaces: Drizzle schema, migrations, the credential
                      engine, business-day arithmetic, the care vocabulary, and the
                      copy-lint ruleset. No app, no routes.
 
-apps/registry        @ccn/registry — the operator console. A consumer of @ccn/core.
+apps/registry        @h-hallows/registry — the operator console. A consumer of @h-hallows/core.
                      → Vercel project 1, non-obvious host, noindex
 
-apps/web             @ccn/web — the front door. Scaffolded to architecture spec § 6:
+apps/web             @h-hallows/web — the front door. Scaffolded to architecture spec § 6:
                      the statutory footer mechanism, the three public intake routes,
                      and the rendering and header rules. The marketing pages and the
                      three portals await ccn-front-door-spec.md.
                      → Vercel project 2, apex domain + app subdomain
 ```
 
-One Postgres. `@ccn/core` owns migrations; **no app ever runs its own**, and CI fails if
+One Postgres. `@h-hallows/core` owns migrations; **no app ever runs its own**, and CI fails if
 one acquires a `migrations/` directory or a `drizzle-kit` dependency.
 
 ## Why a package rather than a shared folder
@@ -46,12 +46,12 @@ Split along one line — the database versus the code that writes through it:
 | `apps/registry/tests` | the referral transaction, the shortlist query layer, the credential vault, the Today buckets |
 | `apps/web/tests` | that public intake creates no live record, that no path reaches the compliance record, that the statutory footer cannot be removed or shipped unapproved |
 
-The schema half lives in `@ccn/core` so it cannot be weakened in one app without the
+The schema half lives in `@h-hallows/core` so it cannot be weakened in one app without the
 other noticing.
 
 ## Splitting this into three repositories
 
-The spec's target is three repositories with `@ccn/core` published to GitHub Packages.
+The spec's target is three repositories with `@h-hallows/core` published to GitHub Packages.
 This workspace is the same layout, so the split is a move rather than a refactor:
 
 1. `git subtree split --prefix=packages/core` into `ccn-core`, publish `0.1.0`.
@@ -63,7 +63,7 @@ This workspace is the same layout, so the split is a move rather than a refactor
 **One thing to add when you split.** Spec § 10's acceptance test — *"eligibility()
 imported in both apps returns identical results for the same fixture"* — cannot run
 across repositories, and exact pinning is precisely the mechanism that lets the two apps
-drift apart. Add a CI check that both apps pin the **same** `@ccn/core` version, or that
+drift apart. Add a CI check that both apps pin the **same** `@h-hallows/core` version, or that
 test can only ever prove the fixture matches itself.
 
 ## Deployment

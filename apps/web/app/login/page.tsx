@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { headers } from 'next/headers';
 import type { Metadata } from 'next';
-import { getDb } from '@ccn/core/db';
+import { getDb } from '@h-hallows/core/db';
 import { getPortalSession, hashToken, newToken } from '@/lib/session';
 import { rateLimit } from '@/lib/rateLimit';
 

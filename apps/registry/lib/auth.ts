@@ -10,7 +10,7 @@
  */
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { cookies } from 'next/headers';
-import { getDb } from '@ccn/core/db';
+import { getDb } from '@h-hallows/core/db';
 import { audit } from '@/lib/audit';
 
 export const SESSION_COOKIE = 'ccn_session';

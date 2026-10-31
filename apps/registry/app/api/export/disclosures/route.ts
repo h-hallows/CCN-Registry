@@ -6,7 +6,7 @@
 import { requireOperator } from '@/lib/operator';
 import { audit } from '@/lib/audit';
 import { disclosureLogToCsv, getCompliance } from '@/lib/queries/compliance';
-import { civilLA, formatISODate } from '@ccn/core/domain';
+import { civilLA, formatISODate } from '@h-hallows/core/domain';
 
 export const dynamic = 'force-dynamic';
 

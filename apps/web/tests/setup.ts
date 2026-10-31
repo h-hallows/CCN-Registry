@@ -1,6 +1,6 @@
 /**
  * The console's suite runs against the same database the library's does — in-memory
- * PGlite by default, or a real Postgres via TEST_DATABASE_URL. See @ccn/core's own
+ * PGlite by default, or a real Postgres via TEST_DATABASE_URL. See @h-hallows/core's own
  * tests/setup.ts for the reasoning; this is the same rule, applied in the app.
  */
 const externalDatabase = process.env.TEST_DATABASE_URL?.trim();

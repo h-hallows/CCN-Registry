@@ -8,9 +8,9 @@ const nextConfig: NextConfig = {
    * its data directory.
    */
   serverExternalPackages: ['@electric-sql/pglite', 'pg'],
-  // @ccn/core ships TypeScript source with no build step (architecture spec § 2.2), so
+  // @h-hallows/core ships TypeScript source with no build step (architecture spec § 2.2), so
   // Next has to compile it rather than treat it as a prebuilt dependency.
-  transpilePackages: ['@ccn/core'],
+  transpilePackages: ['@h-hallows/core'],
   /**
    * The migration SQL files are read at runtime by lib/db/migrate.ts, which /api/health
    * uses to report which migrations are pending. Next traces imports, not readdir calls,

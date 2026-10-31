@@ -6,9 +6,9 @@
  * explicitly — belt and braces — but if one of them forgot to, the policies would
  * return nothing rather than someone else's case.
  */
-import { eligibility } from '@ccn/core/domain';
-import type { CredentialType } from '@ccn/core/schema';
-import type { Tx } from '@ccn/core/db';
+import { eligibility } from '@h-hallows/core/domain';
+import type { CredentialType } from '@h-hallows/core/schema';
+import type { Tx } from '@h-hallows/core/db';
 import { asPortalUser, forEligibilityCheck } from './portalDb';
 import type { PortalSession } from './session';
 
@@ -66,7 +66,7 @@ interface CredRow { provider_id: string; type: string; expires_on: string | null
  * `appears_available`.
  *
  * The view is a safety net for the EXPIRED case only. It cannot cover a MISSING
- * required credential, because that needs the per-type matrix from @ccn/core. The view
+ * required credential, because that needs the per-type matrix from @h-hallows/core. The view
  * exists so a query written in a hurry fails safe; this is the check that is actually
  * correct, and it runs on every render because a shortlist published Monday can hold a
  * provider whose clearance lapses Tuesday.

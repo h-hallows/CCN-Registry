@@ -9,22 +9,22 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace=@ccn/registry",
+    "dev": "npm run dev --workspace=@h-hallows/registry",
     "build": "npm run build --workspaces --if-present",
-    "start": "npm run start --workspace=@ccn/registry",
+    "start": "npm run start --workspace=@h-hallows/registry",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "lint:copy": "npm run lint:copy --workspaces --if-present",
     "ci": "npm run lint:copy && npm run typecheck && npm run test",
-    "db:deploy": "npm run db:deploy --workspace=@ccn/core",
-    "db:migrate": "npm run db:migrate --workspace=@ccn/core",
-    "db:reset": "npm run db:reset --workspace=@ccn/core",
-    "db:seed": "npm run db:seed --workspace=@ccn/core",
+    "db:deploy": "npm run db:deploy --workspace=@h-hallows/core",
+    "db:migrate": "npm run db:migrate --workspace=@h-hallows/core",
+    "db:reset": "npm run db:reset --workspace=@h-hallows/core",
+    "db:seed": "npm run db:seed --workspace=@h-hallows/core",
     "db:up": "docker compose up -d && node scripts/wait-for-pg.mjs",
     "db:down": "docker compose down",
-    "dev:web": "npm run dev --workspace=@ccn/web",
-    "build:registry": "npm run build --workspace=@ccn/registry",
-    "build:web": "npm run build --workspace=@ccn/web"
+    "dev:web": "npm run dev --workspace=@h-hallows/web",
+    "build:registry": "npm run build --workspace=@h-hallows/registry",
+    "build:web": "npm run build --workspace=@h-hallows/web"
   },
   "devDependencies": {
     "typescript": "^5.7.3"

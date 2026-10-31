@@ -4,7 +4,7 @@ import { requireOperator } from '@/lib/operator';
 import { getCase } from '@/lib/queries/cases';
 import { shortlistFor } from '@/lib/queries/match';
 import { SKILLED_CARE_TYPES } from '@/lib/domain/referral';
-import { PERMITTED } from '@ccn/core/domain';
+import { PERMITTED } from '@h-hallows/core/domain';
 import { makeReferralAction, saveShortlistAction } from '@/app/(app)/actions';
 import { ActionForm, Disclose } from '@/components/ActionForm';
 import {

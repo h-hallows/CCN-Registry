@@ -12,13 +12,13 @@
  * `coverage_gaps` table exists so the schema accepts the feature; nothing reads it.
  * See /DEFERRED.md. It slots in between `credentialAlerts` and `thinBench` below.
  */
-import type { CareType, UrgencyValue } from '@ccn/core/schema';
+import type { CareType, UrgencyValue } from '@h-hallows/core/schema';
 
-/** Shared with every other surface; see @ccn/core/domain/care. */
-import { URGENCY_ORDER, URGENCY_LABEL } from '@ccn/core/domain';
+/** Shared with every other surface; see @h-hallows/core/domain/care. */
+import { URGENCY_ORDER, URGENCY_LABEL } from '@h-hallows/core/domain';
 export { URGENCY_ORDER, URGENCY_LABEL };
-import { SEVERITY, civilLA, daysBetween, parseISODate } from '@ccn/core/domain';
-import type { CredStatus } from '@ccn/core/domain';
+import { SEVERITY, civilLA, daysBetween, parseISODate } from '@h-hallows/core/domain';
+import type { CredStatus } from '@h-hallows/core/domain';
 
 export interface BlockingRow {
   caseId: string;

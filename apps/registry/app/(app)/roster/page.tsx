@@ -3,7 +3,7 @@ import { listProvidersWithStanding } from '@/lib/queries/providers';
 import {
   CredentialPill, Eligibility, Empty, Rate, RowLink, Section,
 } from '@/components/ui';
-import { worstRequiredStatus } from '@ccn/core/domain';
+import { worstRequiredStatus } from '@h-hallows/core/domain';
 
 export const dynamic = 'force-dynamic';
 

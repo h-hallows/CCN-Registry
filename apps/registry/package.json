@@ -1,5 +1,5 @@
 {
-  "name": "@ccn/registry",
+  "name": "@h-hallows/registry",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -14,7 +14,7 @@
     "pretest": "npm run lint:copy"
   },
   "dependencies": {
-    "@ccn/core": "npm:@h-hallows/core@0.1.0",
+    "@h-hallows/core": "0.1.0",
     "drizzle-orm": "^0.36.4",
     "next": "^15.1.6",
     "react": "^19.0.0",

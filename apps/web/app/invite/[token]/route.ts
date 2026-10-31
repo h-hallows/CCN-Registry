@@ -8,7 +8,7 @@
  */
 import { redirect } from 'next/navigation';
 import type { NextRequest } from 'next/server';
-import { getDb } from '@ccn/core/db';
+import { getDb } from '@h-hallows/core/db';
 import { hashToken, startSession } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';

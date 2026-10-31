@@ -8,14 +8,14 @@
  *    question 5 is open on what may be surfaced at all.
  */
 import Link from 'next/link';
-import type { CredStatus } from '@ccn/core/domain';
+import type { CredStatus } from '@h-hallows/core/domain';
 
 /**
- * The care vocabulary comes from @ccn/core so the console, the marketing site and the
+ * The care vocabulary comes from @h-hallows/core so the console, the marketing site and the
  * client portal describe the same thing with the same words. Re-exported here only so
  * existing imports in this app keep working.
  */
-export { CARE_LABEL, STATUS_LABEL, END_REASON_LABEL } from '@ccn/core/domain';
+export { CARE_LABEL, STATUS_LABEL, END_REASON_LABEL } from '@h-hallows/core/domain';
 
 const STATUS_COLOR: Record<CredStatus, string> = {
   expired: 'var(--color-expired)',

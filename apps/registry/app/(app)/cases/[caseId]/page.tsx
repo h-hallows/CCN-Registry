@@ -1,11 +1,11 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import type { EndReasonValue } from '@ccn/core/schema';
+import type { EndReasonValue } from '@h-hallows/core/schema';
 import { requireOperator } from '@/lib/operator';
 import { getCase } from '@/lib/queries/cases';
 import { getProviderWithStanding } from '@/lib/queries/providers';
 import { dueWording, URGENCY_LABEL } from '@/lib/domain/buckets';
-import { civilLA, formatISODate } from '@ccn/core/domain';
+import { civilLA, formatISODate } from '@h-hallows/core/domain';
 import { SKILLED_CARE_TYPES } from '@/lib/domain/referral';
 import {
   addNoteAction, endEngagementAction, logCallAction, markWrittenSentAction,
