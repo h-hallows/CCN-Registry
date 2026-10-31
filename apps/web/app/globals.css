@@ -1,24 +1,159 @@
 @import 'tailwindcss';
 
 /*
- * The front door is light by default — it is read by people deciding whether to trust
- * the business, not by an operator at 11pm. The console's palette is deliberately not
- * shared: these are different products with different jobs.
+ * Deliberately not a marketplace.
+ *
+ * Deep blue, emoji section markers, star ratings and counter tiles read as a gig app.
+ * At $40–110 an hour to this clientele that signals volume, when the household is
+ * buying judgement. The register to aim at is a private practice or a family office:
+ * restrained, typographic, generous space, no badges.
+ *
+ * Warm paper, graphite ink, oxblood accent. Serif display for authority, grotesque for
+ * UI, mono for data.
  */
 :root {
-  --ink: #1b1d22;
-  --ink-soft: #4d525c;
-  --page: #ffffff;
-  --line: #e4e4df;
+  --paper:       #FBF9F6;
+  --surface:     #FFFFFF;
+  --surface-2:   #F3EFEA;
+  --ink:         #1A1715;
+  --ink-2:       #55504A;
+  --ink-3:       #847D75;
+  --line:        #E2DCD4;
+  --line-2:      #C9C1B7;
+  --accent:      #6B2733;   /* oxblood */
+  --accent-2:    #8A3845;
+  --accent-soft: #F4E9EA;
+  --ok:          #2A6145;
+  --warn:        #8A5A00;
+  --crit:        #A33227;
+
+  --display: "Spectral", Georgia, serif;
+  --sans:    "Libre Franklin", -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --mono:    "IBM Plex Mono", ui-monospace, monospace;
+
+  --step--1: clamp(.82rem, .80rem + .1vw, .88rem);
+  --step-0:  clamp(1rem, .97rem + .15vw, 1.06rem);
+  --step-1:  clamp(1.2rem, 1.1rem + .4vw, 1.4rem);
+  --step-2:  clamp(1.5rem, 1.3rem + .8vw, 1.95rem);
+  --step-3:  clamp(1.9rem, 1.5rem + 1.6vw, 2.9rem);
+  --step-4:  clamp(2.3rem, 1.7rem + 2.6vw, 4rem);
+
+  --measure: 66ch;
+  --gutter: clamp(1rem, 4vw, 2.5rem);
+
   color-scheme: light;
 }
 
-body {
-  background: var(--page);
-  color: var(--ink);
-  font-family: ui-serif, Georgia, 'Times New Roman', serif;
-  -webkit-font-smoothing: antialiased;
+/*
+ * The portals invert. The marketing site is light-first and does not need a dark
+ * variant: it is read once, in daylight, by somebody deciding whether to call.
+ */
+[data-surface='portal'] {
+  --paper:       #15120F;
+  --surface:     #1C1815;
+  --surface-2:   #241F1B;
+  --ink:         #EDE8E2;
+  --ink-2:       #B7AFA6;
+  --ink-3:       #8A8178;
+  --line:        #332C26;
+  --line-2:      #463D35;
+  --accent:      #C98792;
+  --accent-2:    #D79DA6;
+  --accent-soft: #2A1F21;
+  color-scheme: dark;
 }
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: var(--step-0);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  /* Nothing should scroll sideways. A long rate table scrolls inside its own wrapper. */
+  overflow-x: hidden;
+}
+
+h1, h2, h3 {
+  font-family: var(--display);
+  font-weight: 500;
+  line-height: 1.15;
+  text-wrap: balance;
+  margin: 0 0 .5em;
+}
+h1 { font-size: var(--step-4); letter-spacing: -0.015em; }
+h2 { font-size: var(--step-3); letter-spacing: -0.01em; }
+h3 { font-size: var(--step-1); }
+
+p, li { max-width: var(--measure); }
+p { margin: 0 0 1em; }
+
+a { color: var(--accent); text-underline-offset: .18em; }
+a:hover { color: var(--accent-2); }
+
+/* Uppercase labels get the tracking that makes them legible at small sizes. */
+.label {
+  font-size: var(--step--1);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--ink-3);
+}
+
+/* Tabular numerals wherever rates or dates align down a column. */
+.nums, table { font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--mono); }
+
+/* No border-radius above 6px, anywhere. */
+.card, .btn, input, select, textarea { border-radius: 6px; }
+
+/*
+ * Shadows on exactly one element class — the bench card — and nowhere else. A shadow
+ * everywhere is a shadow nowhere, and this clientele reads heavy elevation as an app.
+ */
+.bench-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(26, 23, 21, .04), 0 8px 24px -16px rgba(26, 23, 21, .25);
+}
+
+.wrap {
+  width: 100%;
+  max-width: 72rem;
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+.prose > * { max-width: var(--measure); }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .6rem 1.1rem;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--step--1);
+  cursor: pointer;
+  text-decoration: none;
+}
+.btn:hover { border-color: var(--ink-3); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--paper); }
+.btn-primary:hover { background: var(--accent-2); border-color: var(--accent-2); color: var(--paper); }
+
+/* A long table scrolls inside this, so the page itself never does. */
+.scroller { overflow-x: auto; max-width: 100%; }
+
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: .6rem .75rem; border-bottom: 1px solid var(--line); }
+th { font-size: var(--step--1); text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); font-weight: 600; }
 
 /*
  * § 1812.5095(h): type no smaller than 6 point, contrasting with the background.
@@ -27,19 +162,20 @@ body {
 .statutory {
   font-size: 9pt;
   border-top: 1px solid var(--line);
-  margin-top: 3rem;
-  padding: 1.25rem 0;
-  color: var(--ink-soft);
+  margin-top: 4rem;
+  padding: 1.5rem 0 3rem;
+  color: var(--ink-2);
   line-height: 1.6;
 }
+.statutory p { margin: 0 0 .35em; max-width: var(--measure); }
 
 /*
  * § 1812.5095(f): the written statement is mailed in type no smaller than 10 point.
  * Declared in points for the same reason, and asserted by a test rather than trusted.
  */
+.statutory-written-statement { font-size: 11pt; line-height: 1.5; }
+
 @media print {
   .statutory-written-statement { font-size: 11pt; line-height: 1.5; }
   .statutory { font-size: 7pt; }
 }
-
-.statutory-written-statement { font-size: 11pt; line-height: 1.5; }
