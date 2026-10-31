@@ -20,11 +20,26 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/*
+ * § 1812.5095(h): type no smaller than 6 point, contrasting with the background.
+ * Set in absolute points, not a rem that could inherit smaller down a nesting chain.
+ */
 .statutory {
+  font-size: 9pt;
   border-top: 1px solid var(--line);
   margin-top: 3rem;
   padding: 1.25rem 0;
   color: var(--ink-soft);
-  font-size: 0.8125rem;
   line-height: 1.6;
 }
+
+/*
+ * § 1812.5095(f): the written statement is mailed in type no smaller than 10 point.
+ * Declared in points for the same reason, and asserted by a test rather than trusted.
+ */
+@media print {
+  .statutory-written-statement { font-size: 11pt; line-height: 1.5; }
+  .statutory { font-size: 7pt; }
+}
+
+.statutory-written-statement { font-size: 11pt; line-height: 1.5; }

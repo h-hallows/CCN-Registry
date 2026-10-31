@@ -1,50 +1,55 @@
 /**
- * Architecture spec § 6.5.
+ * The footer two statutes require on every public page. Spec § 1.4.
  *
- * Rendered by the (marketing) layout, never by an individual page, so no page can omit
- * it. The text is imported from content/statutory and never retyped.
+ * Rendered by the (marketing) layout, never by an individual page, so a page cannot opt
+ * out of its own layout. Both lines are required:
  *
- * A production DEPLOY with text counsel has not approved fails to build. A local build
- * or a preview deploy renders a loud placeholder instead, because gating those as well
- * would mean nothing could be developed until the lawyer replied — the gate is meant to
- * stop the public site shipping, not to stop work.
+ *   § 1812.5095(h)  "… is a referral agency."  — type no smaller than 6 point
+ *   § 1812.533(b)(2) the name plus a street address or business telephone, in EVERY
+ *                    advertisement, which includes every public page
  *
- * VERCEL_ENV rather than NODE_ENV: NODE_ENV is 'production' for every build, including
- * the one you run locally to check a bundle size.
+ * A production DEPLOY missing either line fails to build. A local build or a preview
+ * renders a loud placeholder instead: the gate is meant to stop the public site
+ * shipping, not to stop work. VERCEL_ENV rather than NODE_ENV, because NODE_ENV is
+ * 'production' for every build including the one you run to check a bundle size.
  */
-import { isApproved, REFERRAL_AGENCY_STATEMENT } from '@/content/statutory';
+import { BUSINESS_CONTACT, isDeliverable, REFERRAL_AGENCY_LINE } from '@/content/statutory';
 
 export function StatutoryFooter() {
-  const statement = REFERRAL_AGENCY_STATEMENT;
+  const missing = [REFERRAL_AGENCY_LINE, BUSINESS_CONTACT].filter((t) => !isDeliverable(t));
 
-  if (!isApproved(statement)) {
+  if (missing.length > 0) {
     if (process.env.VERCEL_ENV === 'production') {
       throw new Error(
-        'The statutory footer statement has not been approved by counsel '
-        + `(content/statutory, status "${statement.status}", version ${statement.version}). `
-        + 'No marketing page may ship without it. See COUNSEL.md.',
+        'The statutory footer is incomplete, so no public page may ship: '
+        + missing.map((t) => `${t.citation} (${t.status})`).join('; ')
+        + '. See apps/web/content/statutory/README.md and COUNSEL.md.',
       );
     }
     return (
       <footer
         data-statutory-footer="placeholder"
         style={{
-          borderTop: '2px dashed #a4253a', padding: '1rem', marginTop: '3rem',
-          color: '#a4253a', fontSize: '0.8125rem', lineHeight: 1.6,
+          borderTop: '2px dashed var(--crit, #A33227)', padding: '1rem', marginTop: '3rem',
+          color: 'var(--crit, #A33227)', fontSize: '0.8125rem', lineHeight: 1.6,
         }}
       >
-        <strong>Statutory footer statement not yet supplied.</strong>
-        <br />
-        {statement.purpose}
-        <br />
-        This renders everywhere except a production deploy, which fails to build.
+        <strong>Statutory footer incomplete — this page cannot ship.</strong>
+        <ul style={{ marginTop: '0.5rem' }}>
+          {missing.map((t) => (
+            <li key={t.citation}>
+              <code>{t.citation}</code> — {t.status}. {t.purpose}
+            </li>
+          ))}
+        </ul>
       </footer>
     );
   }
 
   return (
-    <footer data-statutory-footer="approved" className="statutory">
-      <p>{statement.text}</p>
+    <footer data-statutory-footer="complete" className="statutory">
+      <p>{REFERRAL_AGENCY_LINE.text}</p>
+      <p>{BUSINESS_CONTACT.text}</p>
     </footer>
   );
 }

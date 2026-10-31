@@ -14,3 +14,17 @@ Spec § 10. Everything else is built while these are open. Each entry names the 
 
 *Not legal advice. § 0 and § 10 of the build spec need a California employment and
 healthcare attorney before capital is committed.*
+
+## Raised by the web build spec (31 October 2026)
+
+| # | Question | Blocks |
+|---|---|---|
+| 8 | **Approve the § 1812.533(b)(4) residence disclosure and the § 1812.5095(d) provider notice.** The statute gives required content and two quoted phrases but not full wording. Both are drafts in `apps/web/content/statutory/`, marked `draft`, and the code refuses to deliver them. | Every nursing referral. |
+| 9 | Which chapter governs a given referral — § 1812.5095 or §§ 1812.524–1812.533 — and is the superset default the right posture, or does giving a domestic-worker disclosure on a nursing referral create a different problem? | The disclosure flow. Built as the superset for now. |
+| 10 | **Does § 1812.531's fee-splitting prohibition bar any compensation, cash or otherwise, to referring physicians, surgical practices, hospitals or hospital-employed discharge planners?** Does it reach care managers and estate attorneys, who are not enumerated? Where LTC or VA dollars are involved, does federal anti-kickback or Stark attach? | Monetising the partner programme. Built with **no compensation mechanic and no column that could hold one**. |
+| 11 | What form and delivery method does the § 1812.533(b)(4) residence disclosure require, and does "before they are under the care of any nursing personnel" permit delivery at the first shift, or must it precede it? | The status gate's trigger point. Built to block the case going active. |
+| 12 | Does the § 1812.527 fee schedule need to reach CNA, HCA and companion applicants before interview too, or only nurses? | Onboarding. |
+| 13 | May verified credential facts — licence number, verification date, source — be shown to a household at all? Live Scan specifically. | What the client portal may render. |
+| 14 | **Does the trading name create § 1726(b), 22 CCR § 74600(b) or § 1812.533(b)(4) exposure?** | **All marketing pages and all brand spend.** |
+| 15 | Retention: one year is the Chapter 7 floor. Confirm the right period for disclosures, referrals and the assignment log given wage and classification limitation periods. | Retention policy; currently unbounded. |
+| — | The complaint contacts in `complaint-contacts.ts` are **unfilled**. A guessed address sends a complaint nowhere while looking like it works. | Nursing referrals. |
