@@ -39,6 +39,21 @@ invariant it protects is intact.
 
 Treat W3–W5 as needing review against § 4.5 rather than as settled.
 
+## ccn-web now exists twice, and that is temporary
+
+`apps/web` here was split into **h-hallows/CCN-external** with its history intact. That
+repository cannot `npm install` until `@ccn/core` is published, so for now:
+
+- **`apps/web` in this workspace is authoritative.** It is the copy CI builds and tests
+  against the live core.
+- **CCN-external is the destination**, not yet the source. Do not edit it.
+
+Two editable copies of a codebase whose whole point is one implementation of
+`eligibility()` is precisely the failure mode the hard stops exist to prevent, so this
+state should be short. It ends when `@ccn/core@0.1.0` is published to GitHub Packages
+and `apps/web` is deleted from here — at which point this workspace holds `packages/core`
+and `apps/registry` only.
+
 ## Still blocked, and by whom
 
 | Blocker | Blocks | Owner |
@@ -52,5 +67,6 @@ Treat W3–W5 as needing review against § 4.5 rather than as settled.
 | A Postgres for the console | The live deployment, which still reports `not_configured` | Operator |
 | Vercel Root Directory → `apps/registry` | Merging `restructure/workspaces` | Operator |
 | One week of tallies | Nothing technical — it decides what gets funded next | Operator |
+| A `write:packages` token, and a read-only `GITHUB_PACKAGES_TOKEN` on both Vercel projects | Publishing `@ccn/core`, which is what ends the duplicated `ccn-web` above | Operator |
 
 No domain has been purchased. No wordmark has been drawn.
