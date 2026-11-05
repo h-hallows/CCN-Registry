@@ -19,6 +19,9 @@ import { setProviderReferralStatus, upsertCredential } from '@/lib/queries/provi
 import {
   endEngagement, makeReferral, markWrittenStatementSent, ReferralError,
 } from '@/lib/domain/referral';
+import {
+  acceptSubmission, rejectSubmission, SubmissionError,
+} from '@/lib/domain/credentialSubmissions';
 
 const uuid = z.string().uuid();
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected a date');
@@ -31,6 +34,7 @@ function fail(message: string): ActionState {
 
 function messageOf(err: unknown): string {
   if (err instanceof ReferralError) return err.message;
+  if (err instanceof SubmissionError) return err.message;
   if (err instanceof z.ZodError) return err.issues[0]?.message ?? 'Check the form.';
   if (err instanceof Error) return err.message;
   return 'Something went wrong.';
@@ -266,6 +270,96 @@ export async function endEngagementAction(
     revalidatePath('/cases');
     revalidatePath('/today');
     return { ok: 'Engagement recorded as ended.' };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+/**
+ * Reviewing a credential submission. Migration 0008.
+ *
+ * Note what this form does NOT do: it takes no default from the submission. The expiry
+ * and the verification source are typed by the operator from what they checked against
+ * the issuing body, and `identifier` is re-keyed rather than carried over. A provider's
+ * assertion about their own document is not evidence — prefilling these would give the
+ * provider back, through the form, the write that 0008 took away from them.
+ */
+export async function acceptSubmissionAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const parsed = z.object({
+      submissionId: uuid,
+      identifier: z.string().trim().optional(),
+      issuedOn: isoDate.optional().or(z.literal('')),
+      expiresOn: isoDate.optional().or(z.literal('')),
+      verifiedOn: isoDate,
+      verificationSource: z.string().trim().min(3, 'Say how it was verified.'),
+      reviewNote: z.string().trim().optional(),
+      // § 1812.528. Present on the form only for a nursing licence, where the
+      // `nurse_license_inspected` CHECK makes it mandatory.
+      inspectedExpiryNoted: isoDate.optional().or(z.literal('')),
+      inspectedOn: isoDate.optional().or(z.literal('')),
+    }).parse({
+      submissionId: form.get('submissionId'),
+      identifier: form.get('identifier') ?? undefined,
+      issuedOn: form.get('issuedOn') ?? '',
+      expiresOn: form.get('expiresOn') ?? '',
+      verifiedOn: form.get('verifiedOn'),
+      verificationSource: form.get('verificationSource'),
+      reviewNote: form.get('reviewNote') ?? undefined,
+      inspectedExpiryNoted: form.get('inspectedExpiryNoted') ?? '',
+      inspectedOn: form.get('inspectedOn') ?? '',
+    });
+
+    const result = await acceptSubmission(ctx, {
+      submissionId: parsed.submissionId,
+      identifier: parsed.identifier || null,
+      issuedOn: parsed.issuedOn || null,
+      expiresOn: parsed.expiresOn || null,
+      verifiedOn: parsed.verifiedOn,
+      verificationSource: parsed.verificationSource,
+      reviewNote: parsed.reviewNote || null,
+      inspection: parsed.inspectedExpiryNoted
+        ? { expiryNoted: parsed.inspectedExpiryNoted, on: parsed.inspectedOn || null }
+        : null,
+    });
+
+    revalidatePath('/submissions');
+    revalidatePath(`/roster/${result.providerId}`);
+    revalidatePath('/roster');
+    revalidatePath('/compliance');
+    revalidatePath('/today');
+    return {
+      ok: result.renewed
+        ? 'Accepted. The credential was renewed from what you verified.'
+        : 'Accepted. The credential was recorded from what you verified.',
+    };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+/** Rejecting writes no credential. Nothing the provider sent changes their standing. */
+export async function rejectSubmissionAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const parsed = z.object({
+      submissionId: uuid,
+      reviewNote: z.string().trim().min(3, 'Record why it was not accepted.'),
+    }).parse({
+      submissionId: form.get('submissionId'),
+      reviewNote: form.get('reviewNote'),
+    });
+
+    const result = await rejectSubmission(ctx, parsed);
+
+    revalidatePath('/submissions');
+    revalidatePath(`/roster/${result.providerId}`);
+    return { ok: 'Rejected. No credential was recorded.' };
   } catch (err) {
     return fail(messageOf(err));
   }

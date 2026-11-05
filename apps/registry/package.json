@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "CCN Registry OS \u2014 operator console. Single operator, no public surface.",
+  "description": "CCN Registry OS — operator console. Single operator, no public surface.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -18,7 +18,7 @@
     "db:seed": "tsx node_modules/@h-hallows/core/src/db/seed.ts"
   },
   "dependencies": {
-    "@h-hallows/core": "git+https://github.com/h-hallows/CCN-core.git#v0.1.3",
+    "@h-hallows/core": "git+https://github.com/h-hallows/CCN-core.git#v0.1.7",
     "drizzle-orm": "^0.36.4",
     "next": "^15.1.6",
     "react": "^19.0.0",

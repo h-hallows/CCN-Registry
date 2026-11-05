@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { requireOperator } from '@/lib/operator';
 import { signOut } from '@/lib/auth';
 import { getToday } from '@/lib/queries/today';
+import { countPendingSubmissions } from '@/lib/queries/submissions';
 import { Count } from '@/components/ui';
 
 const NAV = [
@@ -9,12 +10,16 @@ const NAV = [
   { href: '/roster', label: 'Roster' },
   { href: '/cases', label: 'Cases' },
   { href: '/match', label: 'Match' },
+  { href: '/submissions', label: 'Submissions' },
   { href: '/compliance', label: 'Compliance' },
 ];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const { operator, ctx } = await requireOperator();
   const today = await getToday(ctx);
+  // The queue is only useful if its size is visible from every screen: a document that
+  // sits unreviewed is a provider who stays off a shortlist they may well belong on.
+  const pendingSubmissions = await countPendingSubmissions();
 
   async function endSession() {
     'use server';
@@ -37,6 +42,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               >
                 {item.label}
                 {item.href === '/today' ? <Count n={today.totalActions} /> : null}
+                {item.href === '/submissions' ? <Count n={pendingSubmissions} /> : null}
               </Link>
             ))}
           </nav>
