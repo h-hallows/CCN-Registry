@@ -16,8 +16,8 @@ jobs:
           node-version: '22'
           cache: npm
 
-      # Installs every workspace and links @h-hallows/core, so the console builds against the
-      # library source rather than a published copy.
+      # @h-hallows/core comes from a git tag over https, so this needs no credentials of
+      # any kind. The repository is public and the tag is immutable.
       - run: npm ci
 
       # I9, and the I1/I2/I7/I8 forbidden identifiers. Fails the build.
@@ -27,8 +27,11 @@ jobs:
       # Work order 01 § 3. The trading name is blocked on counsel, so nothing may
       # hardcode one — a literal would be a find-and-replace across every page and six
       # statutory documents if the name turns out not to be usable.
+      # Was `--workspaces --if-present`, which silently did nothing: no workspace defined
+      # a lint:brand script, so the console could have hardcoded the business name and CI
+      # would have passed. Runs at the root now, where the script actually lives.
       - name: Brand lint
-        run: npm run lint:brand --workspaces --if-present
+        run: npm run lint:brand
 
       - name: Typecheck
         run: npm run typecheck
@@ -59,31 +62,12 @@ jobs:
             echo "An app depends on drizzle-kit. Only @h-hallows/core may generate migrations."
             exit 1
           fi
-          echo "ok: migrations and drizzle-kit live only in packages/core"
+          echo "ok: migrations and drizzle-kit live only in @h-hallows/core, its own repository"
 
-  # § 1812.533(c): a record of every advertisement, with date and publication, kept one
-  # year. A website is an advertisement and it changes every deploy, so this is written
-  # from CI — a manual log would not be kept, and a partial one is worse than none
-  # because it implies the rest are reliable.
-  record-advertisement:
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-      - run: npm ci
-      - name: Record this deploy as an advertisement
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DIRECT_URL: ${{ secrets.DIRECT_URL }}
-        run: |
-          if [ -z "$DATABASE_URL" ]; then
-            echo "No DATABASE_URL secret; skipping. Set it so the § 1812.533(c) log is kept."
-            exit 0
-          fi
-          npx tsx scripts/record-advertisement.mjs \
-            --publication website --reference "$GITHUB_SHA" --recorded-by ci
+# § 1812.533(c) — a record of every advertisement, kept a year — is NOT recorded from
+# here. The operator console is not an advertisement: it is behind a login, it is not
+# offered to the public, and nothing in it solicits anyone. The public site is the
+# advertisement, and that job lives in CCN-external, next to the
+# scripts/record-advertisement.mjs it needs. This repository used to carry a copy of the
+# job that named a script it does not have; it only ever passed because the step skips
+# itself when no DATABASE_URL secret is set.
