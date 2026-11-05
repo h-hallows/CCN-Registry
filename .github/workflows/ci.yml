@@ -18,6 +18,13 @@ jobs:
 
       # @h-hallows/core comes from a git tag over https, so this needs no credentials of
       # any kind. The repository is public and the tag is immutable.
+      # npm records a GitHub git dependency in package-lock.json as git+ssh://, whatever
+      # package.json says, and CI has no SSH key. This makes git use https for
+      # github.com regardless, so `npm ci` resolves @h-hallows/core from the public
+      # repository with no credentials at all. Harmless if npm ever stops doing it.
+      - name: Resolve github git dependencies over https
+        run: git config --global url."https://github.com/".insteadOf git@github.com:
+
       - run: npm ci
 
       # I9, and the I1/I2/I7/I8 forbidden identifiers. Fails the build.
