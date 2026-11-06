@@ -6,6 +6,8 @@ import { getDb } from '@h-hallows/core/db';
 import { LABEL, requiredFor } from '@h-hallows/core/domain';
 import { civilLA, formatISODate } from '@h-hallows/core/domain';
 import { setReferralStatusAction, upsertCredentialAction } from '@/app/(app)/actions';
+import { portalUsersFor } from '@/lib/domain/portalAccess';
+import { PortalAccess } from '@/components/PortalAccess';
 import { ActionForm, Disclose } from '@/components/ActionForm';
 import { CredentialVaultFields } from '@/components/CredentialVaultFields';
 import {
@@ -27,6 +29,7 @@ export default async function ProviderPage({
   const { ctx } = await requireOperator();
   const today = new Date();
   const standing = await getProviderWithStanding(ctx, providerId, today);
+  const portalUsers = await portalUsersFor(ctx, 'provider', providerId);
   if (!standing) notFound();
 
   const { provider, credentials, eligibility, placements, avgEngagementWeeks } = standing;
@@ -274,6 +277,18 @@ export default async function ProviderPage({
             </table>
           </div>
         )}
+      </Section>
+
+      <Section
+        title="Their own screen"
+        blurb="Where this provider hands in a renewed document, states what they are available for, and sees what they have been put forward for. Nothing they enter there becomes a credential until it is checked here."
+      >
+        <PortalAccess
+          kind="provider"
+          subjectId={providerId}
+          users={portalUsers}
+          defaultName={provider.fullName}
+        />
       </Section>
 
       <Section

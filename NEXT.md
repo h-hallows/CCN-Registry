@@ -11,15 +11,23 @@ The `@h-hallows/core` extraction is done. Three repositories, one copy of everyt
 No package registry and no tokens: all three are public, so a tagged git dependency
 installs with no credentials anywhere, including on Vercel.
 
-## Built ahead of the stated sequence
+## Where the build is
 
-Work order 01 § 2 said stop at the end of W2. W3, W4 and W5 were built before it
-arrived. The hard stops exist to prevent two implementations of `eligibility()` and more
-than one migration owner — neither happened, and the extraction those stops were waiting
-for has now completed. Treat W3–W5 as needing a review pass rather than as settled.
+W0–W11 of the web spec are built, reviewed and pushed. The operator half of the portal
+loop — the part the console owns — is built too:
 
-W6, the request action, is where work resumes. The spec calls it the one to review
-twice: it is the path where a household request must never become a referral.
+| | |
+|---|---|
+| Publish a bench | `/match/[caseId]`. Re-runs the identical screen inside the transaction, so a provider who lapsed since the list was drawn is refused by name. One case shows one bench. |
+| Answer a request | `/requests`. Oldest first. Either a referral with its spoken disclosure, which links the request in the same transaction, or a recorded decision that is not one. |
+| Read the feedback | On the case. § 1812.533(b)(5)(B), with no action offered on it — I7. |
+| Give portal access | On the case, the provider and `/partners`. One address, one role, one subject; a grant never un-revokes; one live link at a time. |
+| Referral partners | `/partners`. Who sends work here and what came of it. No money on that screen, and none belongs there — § 1812.531. |
+
+Verified end to end against the Docker Postgres with both applications running: publish →
+the family's portal shows the bench and the note verbatim → they ask → the request reaches
+the console queue → referral and disclosure recorded → their screen reads "Introduced" →
+their feedback lands on the case.
 
 ## Still blocked, and by whom
 

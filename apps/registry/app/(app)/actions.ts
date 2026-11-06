@@ -15,6 +15,14 @@ import { z } from 'zod';
 import { requireOperator } from '@/lib/operator';
 import { addNote, logCall } from '@/lib/queries/cases';
 import { saveShortlistToTimeline } from '@/lib/queries/match';
+import {
+  BenchError, publishBench, resolveRequest, withdrawBench,
+} from '@/lib/queries/bench';
+import {
+  AccessError, grantPortalAccess, isPortalSubjectKind, reissuePortalLink,
+  restorePortalAccess, revokePortalAccess, type PortalSubjectKind,
+} from '@/lib/domain/portalAccess';
+import { addPartner, PartnerError } from '@/lib/queries/partners';
 import { setProviderReferralStatus, upsertCredential } from '@/lib/queries/providers';
 import {
   endEngagement, makeReferral, markWrittenStatementSent, recordReferralOutcome,
@@ -27,7 +35,18 @@ import {
 const uuid = z.string().uuid();
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected a date');
 
-export interface ActionState { error?: string; ok?: string }
+export interface ActionState {
+  error?: string;
+  ok?: string;
+  /**
+   * Something the operator has to copy out of the screen, shown once.
+   *
+   * There is no mail provider, so an issued sign-in link is handed back here rather than
+   * sent. It is never written to the log or the audit diff: only its hash is stored, and
+   * this is the only moment it exists in readable form.
+   */
+  copy?: { label: string; text: string };
+}
 
 function fail(message: string): ActionState {
   return { error: message };
@@ -35,6 +54,9 @@ function fail(message: string): ActionState {
 
 function messageOf(err: unknown): string {
   if (err instanceof ReferralError) return err.message;
+  if (err instanceof BenchError) return err.message;
+  if (err instanceof AccessError) return err.message;
+  if (err instanceof PartnerError) return err.message;
   if (err instanceof SubmissionError) return err.message;
   if (err instanceof z.ZodError) return err.issues[0]?.message ?? 'Check the form.';
   if (err instanceof Error) return err.message;
@@ -168,6 +190,213 @@ export async function saveShortlistAction(
 }
 
 /**
+ * Put the bench in front of the household. The one action in this file whose effect is
+ * visible outside the console.
+ *
+ * The screen runs again inside the transaction, so what the operator saw a minute ago
+ * does not decide who reaches a client. See publishBench.
+ */
+export async function publishBenchAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const caseId = uuid.parse(form.get('caseId'));
+    const providerIds = form.getAll('providerId').map((v) => uuid.parse(v));
+    const note = z.string().trim().max(500, 'Keep the note short.').optional()
+      .parse(form.get('note') || undefined);
+    const result = await publishBench(ctx, { caseId, providerIds, note });
+    revalidatePath(`/cases/${caseId}`);
+    revalidatePath(`/match/${caseId}`);
+    revalidatePath('/today');
+    return {
+      ok: result.replaced > 0
+        ? `${result.count} put in front of the household. The previous bench was withdrawn.`
+        : `${result.count} put in front of the household.`,
+    };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+export async function withdrawBenchAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const shortlistId = uuid.parse(form.get('shortlistId'));
+    const caseId = uuid.parse(form.get('caseId'));
+    const reason = z.string().trim().min(3, 'Record why.').parse(form.get('reason'));
+    await withdrawBench(ctx, shortlistId, reason);
+    revalidatePath(`/cases/${caseId}`);
+    revalidatePath(`/match/${caseId}`);
+    return { ok: 'Bench withdrawn. The household no longer sees it.' };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+/**
+ * Close a request that is not becoming a referral. The two outcomes record what happened,
+ * and neither is a judgment about the provider — nothing here reaches their record.
+ */
+export async function resolveRequestAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const requestId = uuid.parse(form.get('requestId'));
+    const outcome = z.enum(['declined_by_household', 'withdrawn']).parse(form.get('outcome'));
+    const note = z.string().trim().min(3, 'Record what was said.').parse(form.get('note'));
+    await resolveRequest(ctx, requestId, outcome, note);
+    revalidatePath('/requests');
+    revalidatePath('/today');
+    const caseId = form.get('caseId');
+    if (typeof caseId === 'string' && caseId) revalidatePath(`/cases/${caseId}`);
+    return {
+      ok: outcome === 'declined_by_household'
+        ? 'Recorded: the household decided against it.'
+        : 'Recorded: not going ahead.',
+    };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+/**
+ * Portal access. The four actions below are the only way an address gains or loses the
+ * ability to sign in to a portal, and each one records who did it.
+ *
+ * The issued link comes back in `copy` and goes nowhere else — not to the log, not to the
+ * audit diff. Until a mail provider is wired, the operator sends it.
+ */
+/**
+ * Add a referral partner. A name, an organisation and a way to reach them.
+ *
+ * There is deliberately no amount, rate, percentage or balance in this form, and none
+ * should be added: § 1812.531 forbids a nurses' registry from splitting a fee, and what
+ * a partner may be compensated for at all is COUNSEL.md question 3.
+ */
+export async function addPartnerAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const parsed = z.object({
+      name: z.string().trim().min(2, 'Give them a name.'),
+      org: z.string().trim().optional(),
+      role: z.string().trim().optional(),
+      phone: z.string().trim().optional(),
+      email: z.string().trim().email('That is not an email address.').optional(),
+      notes: z.string().trim().optional(),
+    }).parse({
+      name: form.get('name'),
+      org: form.get('org') || undefined,
+      role: form.get('role') || undefined,
+      phone: form.get('phone') || undefined,
+      email: form.get('email') || undefined,
+      notes: form.get('notes') || undefined,
+    });
+    await addPartner(ctx, parsed);
+    revalidatePath('/partners');
+    return { ok: `${parsed.name} added. Give them access when you are ready.` };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+function subjectKind(form: FormData): PortalSubjectKind {
+  const kind = form.get('kind');
+  if (!isPortalSubjectKind(kind)) throw new AccessError('Unknown portal.');
+  return kind;
+}
+
+function revalidateSubject(kind: PortalSubjectKind, subjectId: string | null): void {
+  if (kind === 'household' && subjectId) revalidatePath(`/cases/${subjectId}`);
+  if (kind === 'provider' && subjectId) revalidatePath(`/roster/${subjectId}`);
+  if (kind === 'partner') revalidatePath('/partners');
+}
+
+export async function grantAccessAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const kind = subjectKind(form);
+    const subjectId = uuid.parse(form.get('subjectId'));
+    const email = z.string().trim().email('That is not an email address.')
+      .parse(form.get('email'));
+    const displayName = z.string().trim().min(2, 'Give the person a name.')
+      .parse(form.get('displayName'));
+
+    const result = await grantPortalAccess(ctx, { kind, subjectId, email, displayName });
+    revalidateSubject(kind, subjectId);
+    return {
+      ok: result.existing
+        ? `A new link for ${email}. The previous one no longer works.`
+        : `${email} now has access. Send them this link.`,
+      copy: {
+        label: `Sign-in link for ${email} — works once, expires ${result.expiresAt.slice(0, 10)}`,
+        text: result.url,
+      },
+    };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+export async function reissueLinkAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const userId = uuid.parse(form.get('userId'));
+    const result = await reissuePortalLink(ctx, userId);
+    return {
+      ok: 'New link issued. The previous one no longer works.',
+      copy: {
+        label: `Sign-in link — works once, expires ${result.expiresAt.slice(0, 10)}`,
+        text: result.url,
+      },
+    };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+export async function revokeAccessAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const kind = subjectKind(form);
+    const userId = uuid.parse(form.get('userId'));
+    const reason = z.string().trim().min(3, 'Record why.').parse(form.get('reason'));
+    await revokePortalAccess(ctx, userId, reason);
+    revalidateSubject(kind, (form.get('subjectId') as string | null) ?? null);
+    return { ok: 'Access withdrawn. Any open session is already gone.' };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+export async function restoreAccessAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const kind = subjectKind(form);
+    const userId = uuid.parse(form.get('userId'));
+    const reason = z.string().trim().min(3, 'Record why.').parse(form.get('reason'));
+    await restorePortalAccess(ctx, userId, reason);
+    revalidateSubject(kind, (form.get('subjectId') as string | null) ?? null);
+    return { ok: 'Access restored. Issue a link when you are ready.' };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+/**
  * The referral. The spoken disclosure confirmation is a required, un-prechecked checkbox
  * and the recipient's name is required. There is no skip path and no "record later".
  */
@@ -185,6 +414,7 @@ export async function makeReferralAction(
         errorMap: () => ({ message: 'Confirm that the spoken disclosure was given.' }),
       }),
       note: z.string().trim().optional(),
+      fromRequestId: uuid.optional(),
     }).parse({
       caseId: form.get('caseId'),
       providerId: form.get('providerId'),
@@ -192,6 +422,7 @@ export async function makeReferralAction(
       method: form.get('method'),
       confirm: form.get('confirm'),
       note: form.get('note') ?? undefined,
+      fromRequestId: form.get('fromRequestId') || undefined,
     });
 
     const result = await makeReferral(ctx, {
@@ -202,11 +433,13 @@ export async function makeReferralAction(
       method: parsed.method,
       spokenDisclosureGiven: true,
       note: parsed.note,
+      fromRequestId: parsed.fromRequestId,
     });
 
     revalidatePath(`/cases/${parsed.caseId}`);
     revalidatePath(`/match/${parsed.caseId}`);
     revalidatePath('/today');
+    revalidatePath('/requests');
     revalidatePath('/compliance');
     return { ok: `Referral recorded. Written statement due ${result.writtenDueOn}.` };
   } catch (err) {

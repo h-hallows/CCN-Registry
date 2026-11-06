@@ -129,17 +129,21 @@ These are judgement calls for the business, not oversights.
    to the server log. In deployment that means anyone who can read function logs can
    sign in as a permitted operator.
 3. **No file upload.** Credential submissions take a URL, not a file.
-4. **The console is thinner than the platform** — 37 tests to 221. It also has no
+4. ~~**The console is thinner than the platform** — 37 tests to 221. It also has no
    screen to publish a bench to a household or to see a household's request, so the
    portal request loop has no operator half; and `referrals.outcome` is displayed but
-   written by nothing, so an engagement can never be recorded as started.
-5. **The console's authorization check is one predicate short.** `getOperator()`
+   written by nothing, so an engagement can never be recorded as started.~~ **Closed.**
+   `recordReferralOutcome` writes the outcome and starts the engagement clock; the bench,
+   the request queue and the feedback view give the loop its operator half; and portal
+   access is issued from the console, which nothing did before — so every portal built in
+   W6–W11 was unreachable to everyone. 91 tests.
+5. ~~**The console's authorization check is one predicate short.** `getOperator()`
    verifies a session row exists but checks neither `users.role` nor `disabled_at`,
    while `users` and `sessions` are shared across all four audiences and both
    applications. Not exploitable today — the console's only session issuer gates on
    `OPERATOR_EMAILS` and the portal uses a different cookie and token table — but it
-   is one shared host or one future entry point away from mattering. **Recommend
-   treating as a release blocker.**
+   is one shared host or one future entry point away from mattering.~~ **Closed** —
+   `getOperator()` and `consumeMagicLink` both check `role` and `disabled_at`.
 6. **The statutory texts live only in CCN-external**, yet the console is what delivers
    them. The referral transaction never consults them, and `disclosures.statutory_version`
    is a column default rather than the version actually used — so the compliance record
@@ -185,7 +189,7 @@ in this pass now construct the bug and check the gate catches it.
 |---|---|
 | CCN-core | 13 migrations, 217 tests |
 | CCN-external | 221 tests, 34 routes |
-| CCN-Registry | 37 tests, 15 routes |
+| CCN-Registry | 91 tests, 17 routes |
 | CI | every suite now runs twice — in-memory PGlite and a real Postgres 16 |
 
 CI previously ran only against PGlite, a WASM build that has already differed in ways
@@ -201,8 +205,9 @@ was never exercised on the engine it ships on. It is now.
    referrals.**
 2. Counsel: the trading name. Blocks all marketing.
 3. Set the three Vercel variables and redeploy.
-4. Add `role` and `disabled_at` to the console's `getOperator()`.
+4. ~~Add `role` and `disabled_at` to the console's `getOperator()`.~~ Done.
 5. Point Vercel's Root Directory at `apps/registry`, then merge
    `restructure/workspaces` to `main`.
-6. Wire a mail provider.
+6. Wire a mail provider. Now the sharper of the two: a portal sign-in link is handed to
+   the operator on screen to send by hand, which works and does not scale.
 7. Decide on document storage.

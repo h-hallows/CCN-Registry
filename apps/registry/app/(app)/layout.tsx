@@ -3,6 +3,7 @@ import { requireOperator } from '@/lib/operator';
 import { signOut } from '@/lib/auth';
 import { getToday } from '@/lib/queries/today';
 import { countPendingSubmissions } from '@/lib/queries/submissions';
+import { countPendingRequests } from '@/lib/queries/bench';
 import { Count } from '@/components/ui';
 
 const NAV = [
@@ -10,7 +11,9 @@ const NAV = [
   { href: '/roster', label: 'Roster' },
   { href: '/cases', label: 'Cases' },
   { href: '/match', label: 'Match' },
+  { href: '/requests', label: 'Requests' },
   { href: '/submissions', label: 'Submissions' },
+  { href: '/partners', label: 'Partners' },
   { href: '/compliance', label: 'Compliance' },
 ];
 
@@ -20,6 +23,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // The queue is only useful if its size is visible from every screen: a document that
   // sits unreviewed is a provider who stays off a shortlist they may well belong on.
   const pendingSubmissions = await countPendingSubmissions();
+  // A household waiting on an answer is the one queue with a person at the other end of
+  // it, so its size travels with the operator the same way.
+  const pendingRequestCount = await countPendingRequests();
 
   async function endSession() {
     'use server';
@@ -43,6 +49,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 {item.label}
                 {item.href === '/today' ? <Count n={today.totalActions} /> : null}
                 {item.href === '/submissions' ? <Count n={pendingSubmissions} /> : null}
+                {item.href === '/requests' ? <Count n={pendingRequestCount} /> : null}
               </Link>
             ))}
           </nav>

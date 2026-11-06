@@ -4,12 +4,15 @@ import type { EndReasonValue } from '@h-hallows/core/schema';
 import { requireOperator } from '@/lib/operator';
 import { getCase } from '@/lib/queries/cases';
 import { getProviderWithStanding } from '@/lib/queries/providers';
+import { benchesFor, feedbackForCase } from '@/lib/queries/bench';
+import { portalUsersFor } from '@/lib/domain/portalAccess';
+import { PortalAccess } from '@/components/PortalAccess';
 import { dueWording, URGENCY_LABEL } from '@/lib/domain/buckets';
 import { civilLA, formatISODate } from '@h-hallows/core/domain';
 import { SKILLED_CARE_TYPES } from '@/lib/domain/referral';
 import {
   addNoteAction, endEngagementAction, logCallAction, markWrittenSentAction,
-  recordReferralOutcomeAction,
+  recordReferralOutcomeAction, withdrawBenchAction,
 } from '@/app/(app)/actions';
 import { ActionForm, Disclose } from '@/components/ActionForm';
 import { CopyBox } from '@/components/CopyBox';
@@ -37,6 +40,12 @@ export default async function CasePage({
 
   const isSkilled = (SKILLED_CARE_TYPES as readonly string[]).includes(kase.care);
   const physicianMissing = isSkilled && !h.physicianName?.trim();
+
+  const benches = await benchesFor(ctx, caseId);
+  const liveBench = benches.find((b) => !b.withdrawnAt) ?? null;
+  const pastBenches = benches.filter((b) => b.withdrawnAt);
+  const feedback = await feedbackForCase(ctx, caseId);
+  const portalUsers = await portalUsersFor(ctx, 'household', h.id);
 
   const primary = kase.primaryProviderId
     ? await getProviderWithStanding(ctx, kase.primaryProviderId, now)
@@ -246,6 +255,135 @@ export default async function CasePage({
       </Section>
 
       <Section
+        title="Who can sign in for this family"
+        blurb="There is no sign-up. An address reaches the family's own screen only because it was given access here."
+      >
+        <PortalAccess
+          kind="household"
+          subjectId={h.id}
+          users={portalUsers}
+          defaultName={h.dmName}
+        />
+      </Section>
+
+      <Section
+        title="What the household can see"
+        blurb="Their portal shows one bench and the requests they have made against it. Publishing and withdrawing happen on the match screen."
+      >
+        {!liveBench && pastBenches.length === 0 ? (
+          <Empty>
+            Nothing has been put in front of this household.{' '}
+            <Link href={`/match/${kase.id}`} className="underline underline-offset-4">
+              Draw a bench
+            </Link>{' '}
+            and publish it, and their short list page fills in.
+          </Empty>
+        ) : (
+          <div className="divide-y hair-soft">
+            {liveBench ? (
+              <div className="px-4 py-4">
+                <p className="text-xs" style={{ color: 'var(--ink-faint)' }}>
+                  Live since {shortDateTime(liveBench.publishedAt)}, published by{' '}
+                  {liveBench.publishedBy}
+                  {liveBench.note ? ` · note sent: ${liveBench.note}` : null}
+                </p>
+                <ul className="mt-3 space-y-2.5">
+                  {liveBench.items.map((i) => (
+                    <li key={i.providerId}>
+                      <div className="flex flex-wrap items-baseline gap-2 text-sm">
+                        <RowLink href={`/roster/${i.providerId}`}>{i.providerName}</RowLink>
+                        <span className="text-xs" style={{ color: 'var(--ink-soft)' }}>
+                          {i.type}
+                        </span>
+                        {i.providerStatus !== 'active' ? (
+                          <span className="text-xs" style={{ color: 'var(--color-expired)' }}>
+                            now {i.providerStatus.replace(/_/g, ' ')} on the roster
+                          </span>
+                        ) : null}
+                      </div>
+                      {i.requests.length === 0 ? null : (
+                        <ul className="mt-1 space-y-1">
+                          {i.requests.map((r) => (
+                            <li key={r.requestId} className="text-xs"
+                              style={{
+                                color: r.status === 'pending'
+                                  ? 'var(--color-soon)' : 'var(--ink-faint)',
+                              }}>
+                              asked {shortDateTime(r.requestedAt)} ·{' '}
+                              {r.status.replace(/_/g, ' ')}
+                              {r.note ? ` · “${r.note}”` : null}
+                              {r.status === 'pending' ? (
+                                <>
+                                  {' · '}
+                                  <Link href="/requests" className="underline underline-offset-4">
+                                    answer it
+                                  </Link>
+                                </>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-4">
+                  <Disclose summary="Withdraw this bench" tone="quiet">
+                    <ActionForm
+                      action={withdrawBenchAction}
+                      submitLabel="Withdraw it"
+                      confirm="The household stops seeing this bench and the providers on it. Continue?"
+                    >
+                      <input type="hidden" name="shortlistId" value={liveBench.shortlistId} />
+                      <input type="hidden" name="caseId" value={kase.id} />
+                      <label className="label" htmlFor="bench-withdraw-reason">Why</label>
+                      <input id="bench-withdraw-reason" name="reason" className="input"
+                        required placeholder="What changed" />
+                    </ActionForm>
+                  </Disclose>
+                </div>
+              </div>
+            ) : (
+              <div className="px-4 py-4">
+                <p className="text-sm" style={{ color: 'var(--ink-soft)' }}>
+                  No bench is live. The household sees an empty short list.{' '}
+                  <Link href={`/match/${kase.id}`} className="underline underline-offset-4">
+                    Publish one
+                  </Link>
+                  .
+                </p>
+              </div>
+            )}
+
+            {pastBenches.length > 0 ? (
+              <div className="px-4 py-4">
+                <Disclose
+                  summary={`${pastBenches.length} withdrawn ${pastBenches.length === 1 ? 'bench' : 'benches'}`}
+                  tone="quiet"
+                >
+                  <ul className="space-y-2 text-xs" style={{ color: 'var(--ink-faint)' }}>
+                    {pastBenches.map((b) => (
+                      <li key={b.shortlistId}>
+                        {shortDateTime(b.publishedAt)} – {shortDateTime(b.withdrawnAt!)} ·{' '}
+                        {b.items.map((i) => i.providerName).join(', ')}
+                        {b.items.some((i) => i.requests.length > 0) ? (
+                          <span>
+                            {' · '}
+                            {b.items.flatMap((i) => i.requests).length} request(s), kept on
+                            the record
+                          </span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </Disclose>
+              </div>
+            ) : null}
+          </div>
+        )}
+      </Section>
+
+      <Section
         id="disclosures"
         title="Referrals and disclosures"
         blurb="Every referral carries the spoken disclosure it was made under. These records are permanent."
@@ -352,6 +490,42 @@ export default async function CasePage({
                 ) : null}
               </div>
             ))}
+          </div>
+        )}
+      </Section>
+
+      <Section
+        title="What the household said about the referral"
+        blurb="§ 1812.533(b)(5)(B). This is a rating of the registry's referral, not of the person referred, and it informs future referral decisions only."
+      >
+        {feedback.length === 0 ? (
+          <Empty>
+            Nothing yet. The household is offered the form on their own screen once a
+            referral has been made, and may skip it.
+          </Empty>
+        ) : (
+          <div className="divide-y hair-soft">
+            {feedback.map((f) => (
+              <div key={f.id} className="px-4 py-3">
+                <p className="text-xs" style={{ color: 'var(--ink-faint)' }}>
+                  {shortDateTime(f.at)} · about the referral of {f.providerName}
+                  {f.referralServiceRating === null
+                    ? null
+                    : ` · ${f.referralServiceRating} of 5`}
+                  {f.wouldReferAgain === null
+                    ? null
+                    : f.wouldReferAgain
+                      ? ' · would use us again'
+                      : ' · would not use us again'}
+                </p>
+                {f.notes ? <p className="mt-1 text-sm">{f.notes}</p> : null}
+              </div>
+            ))}
+            <p className="px-4 py-3 text-[0.6875rem] leading-relaxed"
+              style={{ color: 'var(--ink-faint)' }}>
+              There is no action to take here and none is offered. I7 and § 687.2(e): this
+              must never reach a provider, their record or their standing on the roster.
+            </p>
           </div>
         )}
       </Section>

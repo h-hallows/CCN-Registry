@@ -3,6 +3,7 @@
 import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import type { ActionState } from '@/app/(app)/actions';
+import { CopyBox } from '@/components/CopyBox';
 
 type Action = (prev: ActionState | undefined, form: FormData) => Promise<ActionState>;
 
@@ -55,6 +56,13 @@ export function ActionForm({
           <span className="text-xs" style={{ color: 'var(--color-ok)' }}>{state.ok}</span>
         ) : null}
       </div>
+      {/* Shown once, and only here. A sign-in link is a credential: it is not logged,
+          not audited and not re-readable after this render. */}
+      {state?.copy ? (
+        <div className="mt-3">
+          <CopyBox label={state.copy.label} text={state.copy.text} />
+        </div>
+      ) : null}
     </form>
   );
 }

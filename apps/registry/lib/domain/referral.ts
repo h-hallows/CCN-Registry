@@ -42,6 +42,17 @@ export interface MakeReferralInput {
   spokenDisclosureGiven: boolean;
   /** Optional note added to the referral timeline entry. */
   note?: string;
+  /**
+   * The household's own request this referral answers, if it answers one.
+   *
+   * Architecture spec § 3.1: a request never becomes a referral by itself, so the link
+   * is written in this direction and only here — after the referral row exists, inside
+   * the same transaction. The request must be pending, must sit on a bench published for
+   * this case, and must name this provider. Any of those failing aborts the referral
+   * rather than quietly recording an unlinked one, because the two records disagreeing
+   * is the thing the CHECK constraint on that table exists to prevent.
+   */
+  fromRequestId?: string;
   /** Overridable only in tests, so the business-day maths is assertable. */
   now?: Date;
 }
@@ -129,6 +140,10 @@ export async function makeReferral(
       [input.caseId, today, writtenDue],
     );
 
+    if (input.fromRequestId) {
+      await linkRequest(tx, input.fromRequestId, input.caseId, input.providerId, referral.id);
+    }
+
     await emit('referral_made', { caseId: input.caseId, providerId: input.providerId },
       { method: input.method, writtenDueOn: writtenDue }, tx);
 
@@ -150,11 +165,52 @@ export async function makeReferral(
         disclosedBy: input.disclosedBy,
         method: input.method,
         writtenDueOn: writtenDue,
+        fromRequestId: input.fromRequestId ?? null,
       },
     }, tx);
 
     return { referralId: referral.id, disclosureId: disclosure.id, writtenDueOn: writtenDue };
   });
+}
+
+/**
+ * Mark the household's request as answered by this referral.
+ *
+ * The UPDATE names `status` and `referral_id` together because
+ * `shortlist_request_referred_has_referral` refuses either without the other — so a bug
+ * here is a raised exception and a rolled-back referral, not a half-linked record.
+ */
+async function linkRequest(
+  tx: Tx,
+  requestId: string,
+  caseId: string,
+  providerId: string,
+  referralId: string,
+): Promise<void> {
+  const [req] = await tx.query<{ status: string; case_id: string; provider_id: string }>(
+    `SELECT r.status::text AS status, s.case_id, r.provider_id
+       FROM shortlist_requests r
+       JOIN published_shortlists s ON s.id = r.shortlist_id
+      WHERE r.id = $1`,
+    [requestId],
+  );
+  if (!req) throw new ReferralError('That request does not exist.');
+  if (req.status !== 'pending') {
+    throw new ReferralError(`That request is already ${req.status.replace(/_/g, ' ')}.`);
+  }
+  if (req.case_id !== caseId) {
+    throw new ReferralError('That request belongs to another case.');
+  }
+  if (req.provider_id !== providerId) {
+    throw new ReferralError('That request is about a different provider.');
+  }
+
+  await tx.query(
+    `UPDATE shortlist_requests
+        SET status = 'referred', referral_id = $2, resolved_at = now()
+      WHERE id = $1 AND status = 'pending'`,
+    [requestId, referralId],
+  );
 }
 
 async function assertCaseReferable(tx: Tx, caseId: string): Promise<void> {

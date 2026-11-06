@@ -9,7 +9,7 @@
  * but an excluded entry carries only an id, a name and the reason. No profile, no rate,
  * no credential detail, and never a Live Scan result (COUNSEL.md question 5).
  */
-import { getDb } from '@h-hallows/core/db';
+import { getDb, type Tx } from '@h-hallows/core/db';
 import { auditRead, type AuditContext } from '@/lib/audit';
 import {
   compareEligible, screen, type Candidate, type Exclusion, type MatchSignals,
@@ -46,12 +46,24 @@ export interface Shortlist {
   excluded: ExcludedEntry[];
 }
 
-export async function shortlistFor(
-  ctx: AuditContext,
+/**
+ * The screen itself, and nothing else: no audit row, no metric event.
+ *
+ * Separated from `shortlistFor` so that publishing a bench can re-run the identical
+ * screen inside its own transaction without emitting a second `shortlist_generated` or
+ * a read nobody performed. There must be exactly one implementation of who may be put
+ * in front of a household, and this is it — a publish path with its own copy of the
+ * filters is the I12 failure in a different costume.
+ *
+ * `run` is the handle or a transaction. Both expose `query` as a property holding an
+ * arrow function, so destructuring it does not lose a receiver.
+ */
+export async function screenCase(
+  run: Pick<Tx, 'query'>,
   caseId: string,
   today = new Date(),
 ): Promise<Shortlist | null> {
-  const { query } = await getDb();
+  const { query } = run;
 
   const [kase] = await query(
     `SELECT c.id, c.care, c.schedule, c.language_pref, c.rate_band_low, c.rate_band_high,
@@ -161,10 +173,6 @@ export async function shortlistFor(
 
   eligible.sort((a, b) => compareEligible(a.signals, b.signals, a.fullName, b.fullName));
 
-  await auditRead(ctx, 'shortlist', caseId);
-  await emit('shortlist_generated', { caseId },
-    { candidateCount: eligible.length, excludedCount: excluded.length });
-
   return {
     caseId: String(kase.id),
     care: matchCase.care,
@@ -172,6 +180,23 @@ export async function shortlistFor(
     eligible,
     excluded,
   };
+}
+
+/** The screen as the operator asks for it: recorded as a read, and counted. */
+export async function shortlistFor(
+  ctx: AuditContext,
+  caseId: string,
+  today = new Date(),
+): Promise<Shortlist | null> {
+  const db = await getDb();
+  const result = await screenCase(db, caseId, today);
+  if (!result) return null;
+
+  await auditRead(ctx, 'shortlist', caseId);
+  await emit('shortlist_generated', { caseId },
+    { candidateCount: result.eligible.length, excludedCount: result.excluded.length });
+
+  return result;
 }
 
 /** Save the operator's chosen shortlist to the timeline. Not a referral — § 5 keeps these
