@@ -270,6 +270,129 @@ export async function markWrittenStatementSent(
 }
 
 /**
+ * Record what came of a referral. Spec § 4.6, § 8.
+ *
+ * Migration 0001 anticipated this write — "Referrals may be updated only to record an
+ * outcome", enforced by trg_referral_guard — and the app never made it. The referral
+ * could be created and never resolved, which had three consequences that all look like
+ * missing data rather than a missing feature:
+ *
+ *  - `cases.primary_provider_id` was never set by anything, so endEngagement read it as
+ *    null and `engagement_ended` carried no provider. That is the LEAKAGE series in § 8,
+ *    unattributable.
+ *  - `engagement_started` was declared in MetricName and emitted by nothing, so there
+ *    was no start to measure a duration from.
+ *  - the roster's placement count is `count(*) FILTER (WHERE outcome = 'engaged')`, so
+ *    every provider showed zero engagements and a null average, permanently.
+ *
+ * I4: none of the four outcomes is one the registry can cause. The household engaged
+ * someone or declined, the provider declined, or nobody answered. There is no value here
+ * for the registry ending anything, and `endEngagement` remains the only way an
+ * engagement closes.
+ *
+ * Write-once. The outcome is part of the permanent referral record, and the trigger
+ * allows the update whether or not one is already there, so the guard is here.
+ */
+export type ReferralOutcome =
+  | 'engaged' | 'declined_by_household' | 'declined_by_provider' | 'no_response';
+
+const OUTCOME_WORDING: Record<ReferralOutcome, string> = {
+  engaged: 'The household engaged this provider.',
+  declined_by_household: 'The household declined this provider.',
+  declined_by_provider: 'The provider declined this referral.',
+  no_response: 'No response to this referral.',
+};
+
+export async function recordReferralOutcome(
+  ctx: AuditContext,
+  input: {
+    referralId: string;
+    outcome: ReferralOutcome;
+    note?: string;
+    /** The operator recording it, by name, for the timeline the household may be shown. */
+    actor: string;
+  },
+): Promise<{ caseId: string; providerId: string; engaged: boolean }> {
+  const handle = await getDb();
+  const result = await handle.transaction(async (tx) => {
+    const [referral] = await tx.query<{
+      case_id: string; provider_id: string; outcome: string | null;
+      full_name: string; status: string; primary_provider_id: string | null;
+    }>(
+      `SELECT r.case_id, r.provider_id, r.outcome, p.full_name,
+              c.status, c.primary_provider_id
+         FROM referrals r
+         JOIN providers p ON p.id = r.provider_id
+         JOIN cases c ON c.id = r.case_id
+        WHERE r.id = $1
+        FOR UPDATE OF r`,
+      [input.referralId],
+    );
+    if (!referral) throw new ReferralError('Referral not found.');
+    if (referral.outcome) {
+      throw new ReferralError(
+        `An outcome is already recorded for this referral (${referral.outcome.replace(/_/g, ' ')}). `
+        + 'The referral record is permanent and is not corrected in place.',
+      );
+    }
+
+    const [updated] = await tx.query<{ id: string }>(
+      `UPDATE referrals SET outcome = $2, outcome_note = $3, outcome_at = now()
+        WHERE id = $1 AND outcome IS NULL
+        RETURNING id`,
+      [input.referralId, input.outcome, input.note?.trim() || null],
+    );
+    if (!updated) throw new ReferralError('This referral was resolved by someone else.');
+
+    const engaged = input.outcome === 'engaged';
+    if (engaged) {
+      /**
+       * The case moves forward only out of the pre-engagement statuses, for the same
+       * reason makeReferral does: an alternate engaged mid-engagement must not drag an
+       * active or paused case backwards, and an ended one stays ended.
+       */
+      await tx.query(
+        `UPDATE cases
+            SET primary_provider_id = $2,
+                status = CASE WHEN status IN ('inquiry','matching','referred')
+                              THEN 'active'::case_status ELSE status END
+          WHERE id = $1`,
+        [referral.case_id, referral.provider_id],
+      );
+      await emit('engagement_started',
+        { caseId: referral.case_id, providerId: referral.provider_id }, {}, tx);
+    }
+
+    await insertTimeline(tx, {
+      caseId: referral.case_id,
+      type: engaged ? 'status_change' : 'referral',
+      author: input.actor,
+      body: `${OUTCOME_WORDING[input.outcome]}${input.note?.trim() ? ` ${input.note.trim()}` : ''}`,
+      providerId: referral.provider_id,
+    });
+
+    await audit({
+      ...ctx,
+      action: 'update',
+      entity: 'referral',
+      entityId: input.referralId,
+      diff: {
+        outcome: { from: null, to: input.outcome },
+        caseId: referral.case_id,
+        providerId: referral.provider_id,
+        ...(engaged
+          ? { primaryProviderId: { from: referral.primary_provider_id, to: referral.provider_id } }
+          : {}),
+        recordedBy: input.actor,
+      },
+    }, tx);
+
+    return { caseId: referral.case_id, providerId: referral.provider_id, engaged };
+  });
+  return result;
+}
+
+/**
  * I4: the registry cannot end a household–provider relationship. Only the household
  * ending the engagement, the provider declining, or a mutual end is recordable, and the
  * `ended_by` enum has no `registry` member. There is deliberately no terminateProvider

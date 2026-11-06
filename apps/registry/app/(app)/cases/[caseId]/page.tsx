@@ -9,6 +9,7 @@ import { civilLA, formatISODate } from '@h-hallows/core/domain';
 import { SKILLED_CARE_TYPES } from '@/lib/domain/referral';
 import {
   addNoteAction, endEngagementAction, logCallAction, markWrittenSentAction,
+  recordReferralOutcomeAction,
 } from '@/app/(app)/actions';
 import { ActionForm, Disclose } from '@/components/ActionForm';
 import { CopyBox } from '@/components/CopyBox';
@@ -302,6 +303,53 @@ export default async function CasePage({
                     Sent by {r.writtenMethod ?? 'method not recorded'}.
                   </p>
                 )}
+
+                {/*
+                  § 8: recording 'engaged' here is what starts the engagement clock and
+                  sets this case's primary provider. Until it is recorded the referral
+                  counts as nothing — not towards the provider's placements, and not
+                  towards the leakage series, which needs a start to measure from.
+
+                  I4: every option is something the household or the provider did. The
+                  registry ending a relationship is not among them and never will be;
+                  an engagement closes through "End engagement" and nowhere else.
+                */}
+                {r.outcome === null ? (
+                  <div className="mt-3">
+                    <Disclose summary="Record what came of this referral">
+                      <ActionForm
+                        action={recordReferralOutcomeAction}
+                        submitLabel="Record outcome"
+                      >
+                        <input type="hidden" name="referralId" value={r.id} />
+                        <input type="hidden" name="caseId" value={kase.id} />
+                        <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+                          <div>
+                            <label className="label" htmlFor={`outcome-${r.id}`}>Outcome</label>
+                            <select id={`outcome-${r.id}`} name="outcome" className="select"
+                              required defaultValue="">
+                              <option value="" disabled>Choose…</option>
+                              <option value="engaged">Household engaged this provider</option>
+                              <option value="declined_by_household">Household declined</option>
+                              <option value="declined_by_provider">Provider declined</option>
+                              <option value="no_response">No response</option>
+                            </select>
+                          </div>
+                          <div className="sm:col-span-1 lg:col-span-2">
+                            <label className="label" htmlFor={`outcome-note-${r.id}`}>Note</label>
+                            <input id={`outcome-note-${r.id}`} name="note" className="input"
+                              placeholder="Optional" />
+                          </div>
+                        </div>
+                        <p className="mt-2 text-[0.6875rem] leading-relaxed"
+                          style={{ color: 'var(--ink-faint)' }}>
+                          Recorded once and kept. The referral record is permanent, so an
+                          outcome is not corrected in place.
+                        </p>
+                      </ActionForm>
+                    </Disclose>
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>

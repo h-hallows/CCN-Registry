@@ -11,7 +11,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import type { DbHandle } from '@h-hallows/core/db';
 import { caseIdWhere, expectRejection, providerIdByName, seededDb, TEST_CTX } from '@h-hallows/core/testing';
 import {
-  endEngagement, makeReferral, markWrittenStatementSent, ReferralError,
+  endEngagement, makeReferral, markWrittenStatementSent, recordReferralOutcome,
+  ReferralError,
 } from '@/lib/domain/referral';
 import { shortlistFor } from '@/lib/queries/match';
 
@@ -300,5 +301,158 @@ describe('§ 3.8 — the writes that carry the record are audited', () => {
     const diff = typeof row!.diff === 'string' ? JSON.parse(row!.diff) : row!.diff;
     expect(diff.endedBy).toBe('household');
     expect(diff.recordedBy).toBe('Operator Name');
+  });
+});
+
+/**
+ * § 8 — the engagement clock.
+ *
+ * Migration 0001 wrote "Referrals may be updated only to record an outcome" and built
+ * trg_referral_guard to allow exactly that update. The app never made it, so the column
+ * was read in three places and written by none: placements counted
+ * `outcome = 'engaged'` and were structurally zero, `cases.primary_provider_id` was set
+ * by nothing, and `engagement_started` was a declared metric that was never emitted.
+ */
+describe('§ 8 — recording what came of a referral', () => {
+  /**
+   * Its own household and case each time. Recording 'engaged' moves a case to 'active',
+   * so drawing from the seed's handful of matching cases makes each test depend on how
+   * many ran before it.
+   */
+  async function freshReferral(): Promise<{ referralId: string; caseId: string; providerId: string }> {
+    const [household] = await db.query<{ id: string }>(
+      `INSERT INTO households (display_name, dm_name, cr_area, physician_name)
+       VALUES ('Outcome Fixture', 'Outcome Decision Maker', 'Beverly Hills', 'Dr Fixture')
+       RETURNING id`,
+    );
+    const [kase] = await db.query<{ id: string }>(
+      `INSERT INTO cases (household_id, status, care) VALUES ($1, 'matching', 'companion')
+       RETURNING id`,
+      [household!.id],
+    );
+    const caseId = kase!.id;
+    const providerId = await providerIdByName(db, 'Rosalind Pham');
+    const { referralId } = await makeReferral(TEST_CTX, {
+      caseId, providerId, disclosedTo: 'Outcome Household', disclosedBy: 'operator',
+      method: 'phone', spokenDisclosureGiven: true,
+    });
+    return { referralId, caseId, providerId };
+  }
+
+  it('engaging sets the primary provider, moves the case on, and starts the clock', async () => {
+    const { referralId, caseId, providerId } = await freshReferral();
+
+    const result = await recordReferralOutcome(TEST_CTX, {
+      referralId, outcome: 'engaged', actor: 'Operator Name',
+    });
+    expect(result.engaged).toBe(true);
+
+    const [kase] = await db.query<{ status: string; primary_provider_id: string | null }>(
+      `SELECT status, primary_provider_id FROM cases WHERE id = $1`, [caseId],
+    );
+    expect(kase!.primary_provider_id).toBe(providerId);
+    expect(kase!.status).toBe('active');
+
+    const started = await db.query(
+      `SELECT 1 FROM metric_events
+        WHERE event = 'engagement_started' AND case_id = $1 AND provider_id = $2`,
+      [caseId, providerId],
+    );
+    expect(started).toHaveLength(1);
+  });
+
+  /**
+   * The seed writes outcome, primary_provider_id and engagement_started straight into
+   * the database, which is why a development console showed placements and a plausible
+   * metrics table while no code path produced any of it. A deployment starts empty, so
+   * what matters is that the application moves the number, not that it is non-zero.
+   */
+  it('moves the placement count, which no code path could before', async () => {
+    const providerId = await providerIdByName(db, 'Rosalind Pham');
+    const engagedCount = async () => {
+      const [row] = await db.query<{ n: string }>(
+        `SELECT count(*) FILTER (WHERE outcome = 'engaged') AS n
+           FROM referrals WHERE provider_id = $1`,
+        [providerId],
+      );
+      return Number(row!.n);
+    };
+    const before = await engagedCount();
+
+    const { referralId } = await freshReferral();
+    await recordReferralOutcome(TEST_CTX, {
+      referralId, outcome: 'engaged', actor: 'Operator Name',
+    });
+
+    expect(await engagedCount()).toBe(before + 1);
+  });
+
+  it('a declined referral starts nothing and names no primary provider', async () => {
+    const { referralId, caseId } = await freshReferral();
+    const [before] = await db.query<{ primary_provider_id: string | null; status: string }>(
+      `SELECT primary_provider_id, status FROM cases WHERE id = $1`, [caseId],
+    );
+
+    const result = await recordReferralOutcome(TEST_CTX, {
+      referralId, outcome: 'declined_by_household', note: 'Chose a relative instead.',
+      actor: 'Operator Name',
+    });
+    expect(result.engaged).toBe(false);
+
+    const [after] = await db.query<{ primary_provider_id: string | null; status: string }>(
+      `SELECT primary_provider_id, status FROM cases WHERE id = $1`, [caseId],
+    );
+    expect(after!.primary_provider_id).toBe(before!.primary_provider_id);
+    expect(after!.status).toBe(before!.status);
+
+    const [ref] = await db.query<{ outcome: string; outcome_note: string; outcome_at: string }>(
+      `SELECT outcome, outcome_note, outcome_at FROM referrals WHERE id = $1`, [referralId],
+    );
+    expect(ref!.outcome).toBe('declined_by_household');
+    expect(ref!.outcome_note).toBe('Chose a relative instead.');
+    expect(ref!.outcome_at).not.toBeNull();
+  });
+
+  it('refuses to overwrite an outcome that is already recorded', async () => {
+    const { referralId } = await freshReferral();
+    await recordReferralOutcome(TEST_CTX, {
+      referralId, outcome: 'no_response', actor: 'Operator Name',
+    });
+    await expect(recordReferralOutcome(TEST_CTX, {
+      referralId, outcome: 'engaged', actor: 'Operator Name',
+    })).rejects.toThrow(/already recorded/i);
+
+    const [ref] = await db.query<{ outcome: string }>(
+      `SELECT outcome FROM referrals WHERE id = $1`, [referralId],
+    );
+    expect(ref!.outcome).toBe('no_response');
+  });
+
+  it('audits the outcome against the operator', async () => {
+    const { referralId } = await freshReferral();
+    await recordReferralOutcome(TEST_CTX, {
+      referralId, outcome: 'declined_by_provider', actor: 'Operator Name',
+    });
+    const [row] = await db.query<{ actor: string; action: string; diff: unknown }>(
+      `SELECT actor, action, diff FROM audit_log
+        WHERE entity = 'referral' AND entity_id = $1 AND action = 'update'`,
+      [referralId],
+    );
+    expect(row).toBeDefined();
+    expect(row!.actor).toBe(TEST_CTX.actor);
+    const diff = typeof row!.diff === 'string' ? JSON.parse(row!.diff) : row!.diff;
+    expect(diff.outcome.to).toBe('declined_by_provider');
+  });
+
+  it('I4: no outcome exists for the registry ending a relationship', async () => {
+    const values = await db.query<{ v: string }>(
+      `SELECT unnest(enum_range(NULL::referral_outcome))::text AS v`,
+    );
+    for (const { v } of values) {
+      expect(v).not.toMatch(/registry|terminat|fired|removed/i);
+    }
+    expect(values.map((r) => r.v).sort()).toEqual(
+      ['declined_by_household', 'declined_by_provider', 'engaged', 'no_response'],
+    );
   });
 });

@@ -17,7 +17,8 @@ import { addNote, logCall } from '@/lib/queries/cases';
 import { saveShortlistToTimeline } from '@/lib/queries/match';
 import { setProviderReferralStatus, upsertCredential } from '@/lib/queries/providers';
 import {
-  endEngagement, makeReferral, markWrittenStatementSent, ReferralError,
+  endEngagement, makeReferral, markWrittenStatementSent, recordReferralOutcome,
+  ReferralError,
 } from '@/lib/domain/referral';
 import {
   acceptSubmission, rejectSubmission, SubmissionError,
@@ -237,6 +238,59 @@ export async function markWrittenSentAction(
     revalidatePath('/today');
     revalidatePath('/compliance');
     return { ok: 'Written statement recorded as sent.' };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+/**
+ * What came of a referral. § 8: this is the start of the engagement clock, and the only
+ * thing that sets cases.primary_provider_id.
+ *
+ * I4: every option is something the household or the provider did. There is no outcome
+ * here for the registry ending a relationship, and adding one would be an invariant
+ * change, not a new enum member.
+ */
+const REFERRAL_OUTCOMES = [
+  'engaged', 'declined_by_household', 'declined_by_provider', 'no_response',
+] as const;
+
+export async function recordReferralOutcomeAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { operator, ctx } = await requireOperator();
+  try {
+    const parsed = z.object({
+      referralId: uuid,
+      caseId: uuid,
+      outcome: z.enum(REFERRAL_OUTCOMES, {
+        errorMap: () => ({ message: 'Choose what came of the referral.' }),
+      }),
+      note: z.string().trim().optional(),
+    }).parse({
+      referralId: form.get('referralId'),
+      caseId: form.get('caseId'),
+      outcome: form.get('outcome'),
+      note: form.get('note') ?? undefined,
+    });
+
+    const result = await recordReferralOutcome(ctx, {
+      referralId: parsed.referralId,
+      outcome: parsed.outcome,
+      note: parsed.note,
+      actor: operator.displayName,
+    });
+
+    revalidatePath(`/cases/${parsed.caseId}`);
+    revalidatePath('/cases');
+    revalidatePath(`/roster/${result.providerId}`);
+    revalidatePath('/roster');
+    revalidatePath('/today');
+    return {
+      ok: result.engaged
+        ? 'Engagement recorded. The provider is now this case\u2019s primary.'
+        : 'Outcome recorded. No engagement was started.',
+    };
   } catch (err) {
     return fail(messageOf(err));
   }
