@@ -25,6 +25,19 @@ export class BenchError extends Error {}
 
 const SKILLED_SET: ReadonlySet<string> = new Set<string>(SKILLED_CARE_TYPES);
 
+/**
+ * Whether an error is a specific unique-index violation.
+ *
+ * Matched on the index name rather than only on SQLSTATE 23505, so a different
+ * constraint firing is not quietly reported as this one — the drivers differ in what
+ * they expose, and both put the name in the message.
+ */
+function isUniqueViolation(err: unknown, index: string): boolean {
+  const code = (err as { code?: string })?.code;
+  const message = err instanceof Error ? err.message : String(err);
+  return (code === '23505' || /duplicate key/i.test(message)) && message.includes(index);
+}
+
 export interface BenchRequest {
   requestId: string;
   providerId: string;
@@ -217,12 +230,29 @@ export async function publishBench(
       [input.caseId],
     );
 
-    const [bench] = await tx.query<{ id: string }>(
-      `INSERT INTO published_shortlists (case_id, published_by, note)
-       VALUES ($1, $2, $3)
-       RETURNING id`,
-      [input.caseId, ctx.actor, input.note?.trim() || null],
-    );
+    /*
+     * `published_shortlists_one_live_per_case` (core 0019) is what actually holds one
+     * case to one bench — the UPDATE above can only lock rows that exist, so two
+     * publishes arriving together would both insert. Catching it here turns the raw
+     * constraint name into something an operator can act on, which in practice means
+     * "you pressed it twice".
+     */
+    let bench: { id: string } | undefined;
+    try {
+      [bench] = await tx.query<{ id: string }>(
+        `INSERT INTO published_shortlists (case_id, published_by, note)
+         VALUES ($1, $2, $3)
+         RETURNING id`,
+        [input.caseId, ctx.actor, input.note?.trim() || null],
+      );
+    } catch (err) {
+      if (isUniqueViolation(err, 'published_shortlists_one_live_per_case')) {
+        throw new BenchError(
+          'A bench was published for this case a moment ago. Reload the screen to see it.',
+        );
+      }
+      throw err;
+    }
     if (!bench) throw new BenchError('Could not publish the bench.');
 
     for (const [position, providerId] of providerIds.entries()) {

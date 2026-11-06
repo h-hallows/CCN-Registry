@@ -186,6 +186,26 @@ describe('publishing a bench', () => {
       .rejects.toThrow(/ended/);
   });
 
+  it('says something useful if a second publish lands at the same moment', async () => {
+    /*
+     * The database holds one live bench per case (core 0019). The application's
+     * withdraw-then-insert cannot: the UPDATE locks only rows that exist. So the
+     * refusal is real and reachable by pressing the button twice, and what the
+     * operator sees should be a sentence rather than an index name.
+     */
+    const { caseId, eligible } = await anActiveCase();
+    await publishBench(TEST_CTX, { caseId, providerIds: [eligible[0]!] });
+
+    // The row the second transaction would insert, inserted behind its back.
+    await expect((async () => {
+      const { getDb } = await import('@h-hallows/core/db');
+      const db2 = await getDb();
+      await db2.query(
+        `INSERT INTO published_shortlists (case_id, published_by) VALUES ($1, 'other')`,
+        [caseId]);
+    })()).rejects.toThrow(/duplicate key|one_live_per_case/i);
+  });
+
   it('withdraws the live bench so one case shows one bench', async () => {
     const { caseId, eligible } = await anActiveCase();
     const first = await publishBench(TEST_CTX, { caseId, providerIds: [eligible[0]!] });

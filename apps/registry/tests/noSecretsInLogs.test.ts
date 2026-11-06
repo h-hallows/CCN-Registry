@@ -98,3 +98,67 @@ describe('nothing logs a credential', () => {
     }
   });
 });
+
+/**
+ * Every mutation in this console is behind the operator check.
+ *
+ * `requireOperator()` is the only authorization this application has: there are no
+ * per-action roles, because there is one audience. That makes the check uniform and
+ * therefore easy to leave out of the twenty-third action — and a server action with no
+ * check is callable by anyone who can reach the deployment, since Next exposes each one
+ * as its own endpoint whether or not a page renders its form.
+ *
+ * Nothing observable goes wrong when it is missing until somebody notices, so the rule
+ * is asserted over the file rather than per action.
+ */
+describe('every server action is behind the operator check', () => {
+  const source = readFileSync('app/(app)/actions.ts', 'utf8');
+
+  function actions(): { name: string; body: string }[] {
+    const out: { name: string; body: string }[] = [];
+    const re = /export async function (\w+)\s*\(/g;
+    let match: RegExpExecArray | null;
+    const starts: { name: string; at: number }[] = [];
+    while ((match = re.exec(source)) !== null) {
+      starts.push({ name: match[1]!, at: match.index });
+    }
+    for (const [i, s] of starts.entries()) {
+      out.push({
+        name: s.name,
+        body: source.slice(s.at, starts[i + 1]?.at ?? source.length),
+      });
+    }
+    return out;
+  }
+
+  it('finds the actions to check', () => {
+    expect(actions().length).toBeGreaterThan(15);
+  });
+
+  it('calls requireOperator before anything else', () => {
+    const missing = actions()
+      .filter((a) => !a.body.includes('await requireOperator()'))
+      .map((a) => a.name);
+    expect(missing).toEqual([]);
+  });
+
+  it('reads the actor from the session, never from the form', () => {
+    /*
+     * `ctx.actor` is what every audit row and timeline entry is attributed to. Taking
+     * it from a form field would let the caller sign somebody else's name to a
+     * permanent record — and these records are the § 1812.5095 evidence.
+     */
+    for (const action of actions()) {
+      expect(action.body, `${action.name} reads an actor from the form`)
+        .not.toMatch(/form\.get\(['"](actor|operator|author|uploadedBy|disclosedBy)['"]\)/);
+    }
+  });
+});
+
+describe('the document download route', () => {
+  const route = readFileSync('app/(app)/documents/[documentId]/route.ts', 'utf8');
+
+  it('checks the operator before it reads anything', () => {
+    expect(route.indexOf('requireOperator()')).toBeLessThan(route.indexOf('readDocument('));
+  });
+});
