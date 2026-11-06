@@ -8,22 +8,15 @@
  *
  * The accept form starts empty on purpose. See the comment above the form.
  */
-import type { CredentialType } from '@h-hallows/core/schema';
 import { requireOperator } from '@/lib/operator';
 import { civilLA, formatISODate } from '@h-hallows/core/domain';
+import { requiresInspection } from '@/lib/domain/licenceInspection';
 import { listPendingSubmissions, listReviewedSubmissions } from '@/lib/queries/submissions';
 import { acceptSubmissionAction, rejectSubmissionAction } from '@/app/(app)/actions';
 import { ActionForm, Disclose } from '@/components/ActionForm';
 import { Empty, RowLink, Section, shortDateTime } from '@/components/ui';
 
 export const dynamic = 'force-dynamic';
-
-/**
- * § 1812.528 wants the licence physically inspected and its expiry noted, which is a
- * separate act from the primary-source lookup. The `nurse_license_inspected` CHECK makes
- * it mandatory for these two, so the form asks for it where it applies and nowhere else.
- */
-const INSPECTION_REQUIRED: readonly CredentialType[] = ['rn_license', 'lvn_license'];
 
 export default async function SubmissionsPage() {
   const { ctx } = await requireOperator();
@@ -180,7 +173,7 @@ export default async function SubmissionsPage() {
                           className="input"
                         />
                       </div>
-                      {INSPECTION_REQUIRED.includes(s.type) ? (
+                      {requiresInspection(s.type) ? (
                         <>
                           <div>
                             <label className="label" htmlFor={`inspectedExpiryNoted-${s.id}`}>

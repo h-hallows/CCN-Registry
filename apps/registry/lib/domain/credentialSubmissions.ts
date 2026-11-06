@@ -30,6 +30,7 @@ import { getDb } from '@h-hallows/core/db';
 import { asISODate } from '@h-hallows/core/domain';
 import type { CredentialType } from '@h-hallows/core/schema';
 import { audit, type AuditContext } from '@/lib/audit';
+import { assertInspection, type LicenceInspection } from '@/lib/domain/licenceInspection';
 import { emit } from '@/lib/metrics';
 
 export class SubmissionError extends Error {}
@@ -55,17 +56,12 @@ export interface AcceptSubmissionInput {
   notes?: string | null;
   /**
    * § 1812.528: the licence physically inspected, with the expiry noted from the
-   * document itself. Required for rn_license and lvn_license by the
-   * `nurse_license_inspected` CHECK, and a different act from the primary-source lookup
-   * in `verificationSource` — the statute wants both. `expiryNoted` is what the operator
-   * read off the document in front of them, which is why it is separate from
-   * `expiresOn`, what the issuing body says.
+   * document itself. Required for a nursing licence; see lib/domain/licenceInspection.
+   * `expiryNoted` is what the operator read off the document in front of them, which is
+   * why it is separate from `expiresOn`, what the issuing body says.
    */
-  inspection?: { expiryNoted: string; on?: string | null } | null;
+  inspection?: LicenceInspection | null;
 }
-
-/** The two types the § 1812.528 inspection record is mandatory for. */
-const INSPECTION_REQUIRED: readonly CredentialType[] = ['rn_license', 'lvn_license'];
 
 export interface AcceptSubmissionResult {
   submissionId: string;
@@ -147,15 +143,9 @@ export async function acceptSubmission(
       );
     }
 
-    if (INSPECTION_REQUIRED.includes(submission.type) && !input.inspection?.expiryNoted) {
-      throw new SubmissionError(
-        'A nursing licence cannot be recorded without the § 1812.528 inspection: '
-        + 'note the expiry date shown on the licence you inspected.',
-      );
-    }
-    const inspectedAt = input.inspection ? (input.inspection.on || input.verifiedOn) : null;
-    const inspectedBy = input.inspection ? ctx.actor : null;
-    const inspectedExpiry = input.inspection?.expiryNoted ?? null;
+    // § 1812.528, same rule and same message as the credential vault's own form.
+    const { inspectedAt, inspectedBy, inspectedExpiryNoted: inspectedExpiry } =
+      assertInspection(submission.type, input.inspection, ctx.actor, input.verifiedOn);
 
     // One live row per credential type (credentials_one_live_per_type), so a provider
     // handing in a renewal updates the row they already have rather than adding a

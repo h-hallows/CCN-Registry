@@ -5,7 +5,7 @@
  */
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { DbHandle } from '@h-hallows/core/db';
-import { getProviderWithStanding, upsertCredential } from '@/lib/queries/providers';
+import { asDate, getProviderWithStanding, upsertCredential } from '@/lib/queries/providers';
 import { providerIdByName, seededDb, TEST_CTX } from '@h-hallows/core/testing';
 import { addDays, civilLA, formatISODate } from '@h-hallows/core/domain';
 
@@ -91,5 +91,79 @@ describe('credential vault round trip', () => {
       [providerId],
     );
     expect(rows).toHaveLength(1);
+  });
+});
+
+/**
+ * § 1812.528 through the vault form. Until this was fixed, `upsertCredential` wrote no
+ * inspection columns at all, so the `nurse_license_inspected` CHECK refused every RN and
+ * LVN licence the form tried to record — the two credentials the registry exists to
+ * verify. It failed as a raw constraint violation, which reads as a broken screen rather
+ * than as a missing statutory record.
+ */
+describe('§ 1812.528 — a nursing licence carries its inspection record', () => {
+  it('refuses a nursing licence with no inspection, and writes nothing', async () => {
+    const providerId = await providerIdByName(db, 'Grace Okonkwo');
+    const before = await db.query(
+      `SELECT 1 FROM credentials
+        WHERE provider_id = $1 AND type = 'rn_license' AND deleted_at IS NULL`,
+      [providerId],
+    );
+
+    await expect(upsertCredential(TEST_CTX, {
+      providerId,
+      type: 'rn_license',
+      expiresOn: d(400),
+      verifiedOn: d(0),
+      verificationSource: 'BRN license verification',
+    })).rejects.toThrow(/1812\.528|inspect/i);
+
+    const after = await db.query(
+      `SELECT 1 FROM credentials
+        WHERE provider_id = $1 AND type = 'rn_license' AND deleted_at IS NULL`,
+      [providerId],
+    );
+    expect(after).toHaveLength(before.length);
+  });
+
+  it('records a nursing licence once the inspection is given', async () => {
+    const providerId = await providerIdByName(db, 'Grace Okonkwo');
+
+    const result = await upsertCredential(TEST_CTX, {
+      providerId,
+      type: 'rn_license',
+      identifier: 'RN 95512233',
+      expiresOn: d(400),
+      verifiedOn: d(0),
+      verificationSource: 'BRN license verification',
+      inspection: { expiryNoted: d(400) },
+    });
+
+    const [row] = await db.query<{
+      inspected_at: string | null; inspected_by: string | null;
+      inspected_expiry_noted: string | null;
+    }>(
+      `SELECT inspected_at, inspected_by, inspected_expiry_noted
+         FROM credentials WHERE id = $1`,
+      [result.credentialId],
+    );
+    expect(asDate(row!.inspected_at)).toBe(d(0));
+    expect(row!.inspected_by).toBe(TEST_CTX.actor);
+    expect(asDate(row!.inspected_expiry_noted)).toBe(d(400));
+  });
+
+  it('asks for nothing of the sort on a credential the statute does not cover', async () => {
+    const providerId = await providerIdByName(db, 'Grace Okonkwo');
+    const result = await upsertCredential(TEST_CTX, {
+      providerId,
+      type: 'cpr_bls',
+      expiresOn: d(300),
+      verifiedOn: d(0),
+      verificationSource: 'Card sighted and checked with the training provider',
+    });
+    const [row] = await db.query<{ inspected_at: string | null }>(
+      `SELECT inspected_at FROM credentials WHERE id = $1`, [result.credentialId],
+    );
+    expect(row!.inspected_at).toBeNull();
   });
 });

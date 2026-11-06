@@ -9,6 +9,7 @@ import {
   type CredentialLike, type CredStatus, type Eligibility,
 } from '@h-hallows/core/domain';
 import { asISODate } from '@h-hallows/core/domain';
+import { assertInspection, type LicenceInspection } from '@/lib/domain/licenceInspection';
 import { emit } from '@/lib/metrics';
 import type { CredentialType, ProviderType } from '@h-hallows/core/schema';
 
@@ -219,8 +220,20 @@ export async function upsertCredential(
     verificationSource: string;
     documentUrl?: string | null;
     notes?: string | null;
+    /**
+     * § 1812.528. Required for a nursing licence — the `nurse_license_inspected` CHECK
+     * refuses the row without it, on a renewal as well as a first record, because an
+     * UPDATE is checked even though the constraint is NOT VALID for existing rows.
+     * See lib/domain/licenceInspection.
+     */
+    inspection?: LicenceInspection | null;
   },
 ): Promise<{ credentialId: string; renewed: boolean }> {
+  // Before the transaction opens: nothing to roll back, and the operator gets a sentence
+  // rather than a constraint name.
+  const { inspectedAt, inspectedBy, inspectedExpiryNoted } =
+    assertInspection(input.type, input.inspection, ctx.actor, input.verifiedOn);
+
   const handle = await getDb();
   return handle.transaction(async (tx) => {
     const [existing] = await tx.query<{
@@ -235,11 +248,14 @@ export async function upsertCredential(
       await tx.query(
         `UPDATE credentials
             SET identifier = $2, issued_on = $3, expires_on = $4, verified_on = $5,
-                verified_by = $6, verification_source = $7, document_url = $8, notes = $9
+                verified_by = $6, verification_source = $7, document_url = $8, notes = $9,
+                inspected_at = COALESCE($10, inspected_at),
+                inspected_by = COALESCE($11, inspected_by),
+                inspected_expiry_noted = COALESCE($12, inspected_expiry_noted)
           WHERE id = $1`,
         [existing.id, input.identifier ?? null, input.issuedOn ?? null, input.expiresOn ?? null,
           input.verifiedOn, ctx.actor, input.verificationSource, input.documentUrl ?? null,
-          input.notes ?? null],
+          input.notes ?? null, inspectedAt, inspectedBy, inspectedExpiryNoted],
       );
       await tx.query(
         `INSERT INTO credential_events
@@ -255,12 +271,14 @@ export async function upsertCredential(
     const [created] = await tx.query<{ id: string }>(
       `INSERT INTO credentials
          (provider_id, type, identifier, issued_on, expires_on, verified_on,
-          verified_by, verification_source, document_url, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+          verified_by, verification_source, document_url, notes,
+          inspected_at, inspected_by, inspected_expiry_noted)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        RETURNING id`,
       [input.providerId, input.type, input.identifier ?? null, input.issuedOn ?? null,
         input.expiresOn ?? null, input.verifiedOn, ctx.actor, input.verificationSource,
-        input.documentUrl ?? null, input.notes ?? null],
+        input.documentUrl ?? null, input.notes ?? null,
+        inspectedAt, inspectedBy, inspectedExpiryNoted],
     );
     if (!created) throw new Error('Could not record the credential.');
     await tx.query(

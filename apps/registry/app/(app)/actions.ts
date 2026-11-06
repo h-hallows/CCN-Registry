@@ -90,6 +90,9 @@ export async function upsertCredentialAction(
       verifiedOn: isoDate,
       verificationSource: z.string().trim().min(3, 'Say how it was verified.'),
       notes: z.string().trim().optional(),
+      // § 1812.528. Shown by the form only for a nursing licence, and required there.
+      inspectedExpiryNoted: isoDate.optional().or(z.literal('')),
+      inspectedOn: isoDate.optional().or(z.literal('')),
     }).parse({
       providerId: form.get('providerId'),
       type: form.get('type'),
@@ -99,6 +102,8 @@ export async function upsertCredentialAction(
       verifiedOn: form.get('verifiedOn'),
       verificationSource: form.get('verificationSource'),
       notes: form.get('notes') ?? undefined,
+      inspectedExpiryNoted: form.get('inspectedExpiryNoted') ?? '',
+      inspectedOn: form.get('inspectedOn') ?? '',
     });
 
     const result = await upsertCredential(ctx, {
@@ -110,6 +115,9 @@ export async function upsertCredentialAction(
       verifiedOn: parsed.verifiedOn,
       verificationSource: parsed.verificationSource,
       notes: parsed.notes || null,
+      inspection: parsed.inspectedExpiryNoted
+        ? { expiryNoted: parsed.inspectedExpiryNoted, on: parsed.inspectedOn || null }
+        : null,
     });
 
     revalidatePath(`/roster/${parsed.providerId}`);

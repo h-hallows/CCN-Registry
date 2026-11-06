@@ -7,6 +7,7 @@ import { LABEL, requiredFor } from '@h-hallows/core/domain';
 import { civilLA, formatISODate } from '@h-hallows/core/domain';
 import { setReferralStatusAction, upsertCredentialAction } from '@/app/(app)/actions';
 import { ActionForm, Disclose } from '@/components/ActionForm';
+import { CredentialVaultFields } from '@/components/CredentialVaultFields';
 import {
   Banner, CARE_LABEL, CredentialPill, Eligibility, Empty, Field, formatBlocks, Rate,
   RowLink, Section, shortDate, shortDateTime,
@@ -176,48 +177,12 @@ export default async function ProviderPage({
             resetOnSuccess
           >
             <input type="hidden" name="providerId" value={provider.id} />
-            <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
-              <div>
-                <label className="label" htmlFor="type">Credential</label>
-                <select id="type" name="type" className="select" required
-                  defaultValue={eligibility.blocking[0] ?? required[0]}>
-                  {ALL_TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {LABEL[t]}{required.includes(t) ? ' (required)' : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="label" htmlFor="expiresOn">Expires</label>
-                <input id="expiresOn" name="expiresOn" type="date" className="input" />
-                <p className="mt-1 text-[0.6875rem]" style={{ color: 'var(--ink-faint)' }}>
-                  Leave blank if it does not expire.
-                </p>
-              </div>
-              <div>
-                <label className="label" htmlFor="verifiedOn">Verified on</label>
-                <input id="verifiedOn" name="verifiedOn" type="date" className="input"
-                  required defaultValue={todayISO} />
-              </div>
-              <div>
-                <label className="label" htmlFor="verificationSource">Verified how</label>
-                <input id="verificationSource" name="verificationSource" className="input"
-                  required placeholder="BRN license verification" />
-              </div>
-              <div>
-                <label className="label" htmlFor="identifier">Identifier</label>
-                <input id="identifier" name="identifier" className="input" placeholder="Optional" />
-              </div>
-              <div>
-                <label className="label" htmlFor="issuedOn">Issued</label>
-                <input id="issuedOn" name="issuedOn" type="date" className="input" />
-              </div>
-              <div className="sm:col-span-2">
-                <label className="label" htmlFor="notes">Note</label>
-                <input id="notes" name="notes" className="input" placeholder="Optional" />
-              </div>
-            </div>
+            <CredentialVaultFields
+              allTypes={ALL_TYPES}
+              required={required}
+              defaultType={eligibility.blocking[0] ?? required[0]!}
+              todayISO={todayISO}
+            />
           </ActionForm>
         </div>
       </Section>
