@@ -112,15 +112,56 @@ describe('I3 — no referral without a disclosure, through the sanctioned path',
   });
 
   it('rolls back the disclosure when the referral cannot be written', async () => {
+    /*
+     * This used to pass an all-zeros provider id, which fails in
+     * assertProviderEligible BEFORE the disclosure is ever inserted — so the
+     * assertion that the count was unchanged was satisfied trivially and would have
+     * passed against an implementation with no transaction at all. That is the
+     * failure mode INVARIANTS.md records from the 0008 post-mortem: an invariant is
+     * only as good as the assertion actually written.
+     *
+     * The real test makes the LAST statement fail, which is the only way to learn
+     * whether the earlier writes come back. The submissions suite in 38e0185 uses the
+     * same technique; I3 is the older and more load-bearing of the two and had none.
+     */
     const caseId = await caseIdWhere(db, `c.status = 'active'`);
-    const before = await db.query<{ n: string }>(`SELECT count(*) AS n FROM disclosures`);
-    await expect(makeReferral({
-      caseId, providerId: '00000000-0000-0000-0000-000000000000',
+    const providerId = await providerIdByName(db, 'Imelda Santoyo');
+
+    await db.exec(`
+      CREATE OR REPLACE FUNCTION i3_rollback_probe() RETURNS trigger AS $fn$
+      BEGIN RAISE EXCEPTION 'i3 probe: referral insert refused'; END $fn$ LANGUAGE plpgsql;
+      CREATE TRIGGER trg_i3_rollback_probe BEFORE INSERT ON referrals
+        FOR EACH ROW EXECUTE FUNCTION i3_rollback_probe();
+    `);
+
+    const beforeD = await db.query<{ n: string }>(`SELECT count(*) AS n FROM disclosures`);
+    const beforeT = await db.query<{ n: string }>(`SELECT count(*) AS n FROM timeline_entries`);
+    try {
+      await expect(makeReferral({
+        caseId, providerId,
+        disclosedTo: 'Someone', disclosedBy: 'operator', method: 'phone',
+        spokenDisclosureGiven: true,
+      })).rejects.toThrow(/i3 probe/);
+
+      const afterD = await db.query<{ n: string }>(`SELECT count(*) AS n FROM disclosures`);
+      const afterT = await db.query<{ n: string }>(`SELECT count(*) AS n FROM timeline_entries`);
+      // The disclosure and its timeline entry were both written before the referral.
+      // If the transaction is real, neither survives.
+      expect(afterD[0]!.n).toBe(beforeD[0]!.n);
+      expect(afterT[0]!.n).toBe(beforeT[0]!.n);
+    } finally {
+      await db.exec(`DROP TRIGGER IF EXISTS trg_i3_rollback_probe ON referrals;`);
+    }
+
+    // And the same call succeeds once the probe is gone, so the failure above was the
+    // trigger and not something the function refuses anyway.
+    const ok = await makeReferral({
+      caseId, providerId,
       disclosedTo: 'Someone', disclosedBy: 'operator', method: 'phone',
       spokenDisclosureGiven: true,
-    })).rejects.toThrow();
-    const after = await db.query<{ n: string }>(`SELECT count(*) AS n FROM disclosures`);
-    expect(after[0]!.n).toBe(before[0]!.n);
+    });
+    expect(ok.referralId).toBeTruthy();
+    expect(ok.disclosureId).toBeTruthy();
   });
 });
 

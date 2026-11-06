@@ -97,6 +97,21 @@ interface SubmissionRow {
  * `verified_by` is the operator from the audit context. It is never read from the
  * submission, and there is no parameter that would let a caller supply it.
  */
+/**
+ * Credential types that always carry an expiry.
+ *
+ * A blank expiry is right for a Live Scan and never right for these. The consequence
+ * is not cosmetic: credStatus(null) is 'none', eligibility() blocks only on 'expired',
+ * and worstRequiredStatus ranks 'none' as the BEST status — so one empty date field
+ * produced a required credential that never expires, never blocks a shortlist and
+ * never appears on the Today or Compliance screens. That is the I12 outcome reached
+ * through a form field instead of an override.
+ */
+const MUST_EXPIRE: readonly string[] = [
+  'rn_license', 'lvn_license', 'cna_cert', 'hca_registry', 'tb_clearance', 'cpr_bls',
+  'auto_insurance', 'drivers_license',
+];
+
 export async function acceptSubmission(
   ctx: AuditContext,
   input: AcceptSubmissionInput,
@@ -124,6 +139,14 @@ export async function acceptSubmission(
 
     // Caught here so the operator reads a sentence rather than a constraint name. The
     // CHECK is still what enforces it; this is only the readable half.
+    if (MUST_EXPIRE.includes(submission.type) && !input.expiresOn?.trim()) {
+      throw new SubmissionError(
+        'This credential expires, so it needs an expiry date. Leaving it blank would '
+        + 'record it as never expiring, and it would stop appearing in the renewal '
+        + 'queue entirely.',
+      );
+    }
+
     if (INSPECTION_REQUIRED.includes(submission.type) && !input.inspection?.expiryNoted) {
       throw new SubmissionError(
         'A nursing licence cannot be recorded without the § 1812.528 inspection: '

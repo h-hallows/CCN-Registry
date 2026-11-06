@@ -12,7 +12,7 @@ export default defineConfig({
     poolOptions: { forks: { singleFork: true } },
     // @h-hallows/core ships TypeScript source with no build step, so it must be transformed
     // rather than treated as an external, prebuilt dependency.
-    server: { deps: { inline: [/@ccn\/core/] } },
+    server: { deps: { inline: [/@h-hallows\/core/] } },
   },
   resolve: {
     alias: { '@': fileURLToPath(new URL('.', import.meta.url)) },

@@ -14,7 +14,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { DbHandle } from '@h-hallows/core/db';
-import { expectRejection, seededDb, TEST_CTX } from '@h-hallows/core/testing';
+import { expectRejection, providerIdByName, seededDb, TEST_CTX } from '@h-hallows/core/testing';
 import {
   addDays, asISODate, civilLA, eligibility, formatISODate,
 } from '@h-hallows/core/domain';
@@ -494,5 +494,65 @@ describe('the review is audited', () => {
     );
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.map((r) => r.action)).toContain('update');
+  });
+});
+
+describe('a credential that expires must be given an expiry', () => {
+  /*
+   * A blank expiry is right for a Live Scan and never right for a licence, a TB
+   * clearance or a CPR card. The consequence is not cosmetic: credStatus(null) is
+   * 'none', eligibility() blocks only on 'expired', and worstRequiredStatus ranks
+   * 'none' as the BEST status — so one empty date field produced a required
+   * credential that never expires, never blocks a shortlist and never appears in the
+   * renewal queue. The I12 outcome, reached through a form field.
+   */
+  it('refuses a TB clearance with no expiry', async () => {
+    const providerId = await providerIdByName(db, 'Imelda Santoyo');
+    const [sub] = await db.query<{ id: string }>(
+      `INSERT INTO credential_submissions (provider_id, type, identifier)
+       VALUES ($1, 'tb_clearance', 'TB-NOEXP') RETURNING id`, [providerId]);
+
+    await expect(acceptSubmission(TEST_CTX, {
+      submissionId: sub!.id,
+      identifier: 'TB-NOEXP',
+      expiresOn: null,
+      verifiedOn: d(0),
+      verificationSource: 'Clinic record',
+    })).rejects.toThrow(/expiry date/i);
+
+    const [still] = await db.query<{ state: string }>(
+      `SELECT state::text AS state FROM credential_submissions WHERE id = $1`, [sub!.id]);
+    expect(still!.state).toBe('submitted');
+  });
+
+  it('accepts it once the expiry is supplied', async () => {
+    const providerId = await providerIdByName(db, 'Imelda Santoyo');
+    const [sub] = await db.query<{ id: string }>(
+      `INSERT INTO credential_submissions (provider_id, type, identifier)
+       VALUES ($1, 'tb_clearance', 'TB-OK') RETURNING id`, [providerId]);
+
+    const result = await acceptSubmission(TEST_CTX, {
+      submissionId: sub!.id,
+      identifier: 'TB-OK',
+      expiresOn: d(365),
+      verifiedOn: d(0),
+      verificationSource: 'Clinic record',
+    });
+    expect(result.credentialId).toBeTruthy();
+  });
+
+  it('still allows a blank expiry where blank is correct', async () => {
+    const providerId = await providerIdByName(db, 'Grace Okonkwo');
+    const [sub] = await db.query<{ id: string }>(
+      `INSERT INTO credential_submissions (provider_id, type, identifier)
+       VALUES ($1, 'live_scan', 'DOJ-BLANK-OK') RETURNING id`, [providerId]);
+    const result = await acceptSubmission(TEST_CTX, {
+      submissionId: sub!.id,
+      identifier: 'DOJ-BLANK-OK',
+      expiresOn: null,
+      verifiedOn: d(0),
+      verificationSource: 'CA DOJ subsequent arrest notification',
+    });
+    expect(result.credentialId).toBeTruthy();
   });
 });

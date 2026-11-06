@@ -18,7 +18,11 @@ const nextConfig: NextConfig = {
    * health route throws before it can report anything.
    */
   outputFileTracingIncludes: {
-    '/api/health': ['../../packages/core/migrations/**/*.sql'],
+    // core is a git dependency now, not a workspace package. The old
+    // ../../packages/core path has not existed since the split, so a deployed build
+    // could not read its own migration list and /api/health reported schema
+    // 'unknown' — the one thing that route exists to get right.
+    '/api/health': ['./node_modules/@h-hallows/core/migrations/**/*.sql'],
   },
   // The data here is health-adjacent information about private individuals.
   // No public surface in V1 (§ 9), so nothing is indexable and nothing is cached.

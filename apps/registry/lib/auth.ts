@@ -84,6 +84,12 @@ export async function consumeMagicLink(token: string): Promise<Operator | null> 
     `UPDATE auth_tokens t
         SET consumed_at = now()
       WHERE t.token_hash = $1 AND t.consumed_at IS NULL AND t.expires_at > now()
+        -- The same two predicates as getOperator. A link issued before someone was
+        -- disabled must not still let them in.
+        AND EXISTS (SELECT 1 FROM users u
+                     WHERE u.id = t.user_id
+                       AND u.role = 'operator'
+                       AND u.disabled_at IS NULL)
       RETURNING t.user_id,
                 (SELECT email FROM users WHERE id = t.user_id)        AS email,
                 (SELECT display_name FROM users WHERE id = t.user_id) AS display_name,
@@ -121,10 +127,30 @@ export async function getOperator(): Promise<Operator | null> {
   if (!token) return null;
 
   const { query } = await getDb();
+  /*
+   * `role` and `disabled_at` are both predicates here, not decoration.
+   *
+   * This checked only that a live session row existed. `role` was selected and never
+   * compared to anything, and `disabled_at` was not read at all — while `users` and
+   * `sessions` are ONE table shared by all four audiences and both applications. So
+   * the console's single authorization decision was satisfied by any user of any role
+   * holding any live session, and `disabled_at` — the documented way to withdraw
+   * access, since rows are never deleted — had no effect on the console whatsoever: a
+   * disabled operator kept working sessions for up to fourteen days.
+   *
+   * Not reachable today, because the console's only session issuer gates on
+   * OPERATOR_EMAILS and the portal uses a different cookie and a different token
+   * table. It becomes reachable the moment the two are served from one host, a portal
+   * token leaks, or any future entry point issues a session for a non-operator. The
+   * sibling application has checked both from the start and says why.
+   */
   const [row] = await query<{ id: string; email: string; display_name: string; role: string }>(
     `SELECT u.id, u.email, u.display_name, u.role
        FROM sessions s JOIN users u ON u.id = s.user_id
-      WHERE s.token_hash = $1 AND s.expires_at > now()`,
+      WHERE s.token_hash = $1
+        AND s.expires_at > now()
+        AND u.role = 'operator'
+        AND u.disabled_at IS NULL`,
     [hash(token)],
   );
   return row ? { id: row.id, email: row.email, displayName: row.display_name, role: row.role } : null;
