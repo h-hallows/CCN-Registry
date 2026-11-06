@@ -156,10 +156,21 @@ These are judgement calls for the business, not oversights.
    is one shared host or one future entry point away from mattering.~~ **Closed** —
    `getOperator()` and `consumeMagicLink` both check `role` and `disabled_at`.
 6. **The statutory texts live only in CCN-external**, yet the console is what delivers
-   them. The referral transaction never consults them, and `disclosures.statutory_version`
-   is a column default rather than the version actually used — so the compliance record
-   cannot prove which wording was delivered, which § 1.6 says is the point of versioning
-   them.
+   them. ~~The referral transaction never consults them, and
+   `disclosures.statutory_version` is a column default rather than the version actually
+   used — so the compliance record cannot prove which wording was delivered.~~ **Half
+   closed, and the better half.** Core 0018 lets a disclosure point at the copy of the
+   statement that was actually sent, which the operator attaches when recording the
+   delivery — a document with a digest the database checked against its own bytes,
+   rather than a version number that is hand-bumped and drifts from the text it names.
+   Attaching it is optional: some statements go out by post and nobody scans the copy,
+   and requiring one would make the choice an unrecorded delivery or a fabricated
+   document. The screen says plainly which of the two a record is.
+
+   Still open: the texts themselves are in the wrong repository, and moving them into
+   `@h-hallows/core` would let the referral transaction stamp the version it used as
+   well. That move has to carry the I9 copy-lint's `content/statutory/` exception with
+   it, which is the part worth doing carefully rather than in passing.
 7. **"Private duty nursing"** is the industry search term and the I2 copy lint bans
    "duty". Rephrased rather than weakening a statutory gate; worth a counsel
    conversation before anyone changes the ruleset for SEO.
@@ -198,9 +209,9 @@ in this pass now construct the bug and check the gate catches it.
 
 | | |
 |---|---|
-| CCN-core | 17 migrations, 276 tests |
+| CCN-core | 18 migrations, 279 tests |
 | CCN-external | 240 tests, 36 routes |
-| CCN-Registry | 112 tests, 19 routes |
+| CCN-Registry | 115 tests, 19 routes |
 | CI | every suite now runs twice — in-memory PGlite and a real Postgres 16 |
 
 CI previously ran only against PGlite, a WASM build that has already differed in ways

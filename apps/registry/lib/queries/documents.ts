@@ -168,6 +168,32 @@ export async function fileDocument(
   ctx: AuditContext,
   input: FileDocumentInput,
 ): Promise<{ id: string; sha256Hex: string; duplicateOf: string | null }> {
+  const handle = await getDb();
+  return handle.transaction((tx) => fileDocumentInternal(tx, ctx, input));
+}
+
+/**
+ * File a document inside somebody else's transaction.
+ *
+ * `markWrittenStatementSent` uses this so the copy of the statement and the record of
+ * the delivery either both land or neither does — a disclosure pointing at a document
+ * that failed to write, or a document filed against a delivery that rolled back, are
+ * both worse than no copy at all.
+ */
+export async function fileDocumentIn(
+  tx: Tx,
+  ctx: AuditContext,
+  input: FileDocumentInput,
+): Promise<string> {
+  const { id } = await fileDocumentInternal(tx, ctx, input);
+  return id;
+}
+
+async function fileDocumentInternal(
+  tx: Tx,
+  ctx: AuditContext,
+  input: FileDocumentInput,
+): Promise<{ id: string; sha256Hex: string; duplicateOf: string | null }> {
   const filename = input.filename.trim().slice(0, 200);
   if (!filename) throw new DocumentError('That file has no name.');
   if (!ACCEPTED[input.contentType]) {
@@ -186,9 +212,8 @@ export async function fileDocument(
   }
 
   const sha256Hex = createHash('sha256').update(input.bytes).digest('hex');
-  const handle = await getDb();
 
-  return handle.transaction(async (tx) => {
+  {
     await assertSubjectExists(tx, input.subject);
 
     /*
@@ -241,7 +266,7 @@ export async function fileDocument(
     }, tx);
 
     return { id: row.id, sha256Hex, duplicateOf: existing?.id ?? null };
-  });
+  }
 }
 
 async function assertSubjectExists(tx: Tx, subject: Subject): Promise<void> {

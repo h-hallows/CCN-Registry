@@ -299,20 +299,56 @@ export async function markWrittenStatementSent(
   sentOn: string,
   method: string,
   actor: string,
+  /**
+   * A copy of what was actually sent, if one was kept. Migration 0018.
+   *
+   * Optional, and that is the deliberate part: some statements go out by post from a
+   * template and nobody scans the copy. Requiring one would make the choice between an
+   * unrecorded delivery and a fabricated document, and an unrecorded delivery is the
+   * § 1812.5095(f) failure the whole screen exists to prevent.
+   */
+  sentStatement?: { filename: string; contentType: string; bytes: Buffer },
 ): Promise<void> {
   const handle = await getDb();
   await handle.transaction(async (tx) => {
+    const [before] = await tx.query<{ case_id: string }>(
+      `SELECT case_id FROM disclosures WHERE id = $1`, [disclosureId]);
+    if (!before) throw new ReferralError('Disclosure not found.');
+
+    /*
+     * The document is filed first, inside this transaction, so the reference the
+     * disclosure takes cannot point at a row that failed to write — and a failure
+     * anywhere below rolls the document back with the delivery it belongs to.
+     */
+    let documentId: string | null = null;
+    if (sentStatement) {
+      const { fileDocumentIn } = await import('@/lib/queries/documents');
+      documentId = await fileDocumentIn(tx, ctx, {
+        subject: { kind: 'case', id: before.case_id },
+        kind: 'written_statement',
+        filename: sentStatement.filename,
+        contentType: sentStatement.contentType,
+        bytes: sentStatement.bytes,
+        note: `The statement sent ${sentOn} by ${method}.`,
+        // They received it. A copy of their own statement is theirs to re-read.
+        visibleToSubject: true,
+      });
+    }
+
     const [row] = await tx.query<{ case_id: string }>(
-      `UPDATE disclosures SET written_sent_on = $2, written_method = $3
+      `UPDATE disclosures
+          SET written_sent_on = $2, written_method = $3,
+              written_statement_document_id = COALESCE($4, written_statement_document_id)
         WHERE id = $1 RETURNING case_id`,
-      [disclosureId, sentOn, method],
+      [disclosureId, sentOn, method, documentId],
     );
     if (!row) throw new ReferralError('Disclosure not found.');
     await insertTimeline(tx, {
       caseId: row.case_id,
       type: 'written_disclosure',
       author: actor,
-      body: `Written statement sent ${sentOn} by ${method}.`,
+      body: `Written statement sent ${sentOn} by ${method}.`
+        + (documentId ? ' A copy of what was sent is on file.' : ''),
     });
     await tx.query(`UPDATE cases SET written_sent_on = $2 WHERE id = $1`, [row.case_id, sentOn]);
     await audit({
@@ -320,7 +356,12 @@ export async function markWrittenStatementSent(
       action: 'update',
       entity: 'disclosure',
       entityId: disclosureId,
-      diff: { writtenSentOn: sentOn, writtenMethod: method, caseId: row.case_id },
+      diff: {
+        writtenSentOn: sentOn,
+        writtenMethod: method,
+        caseId: row.case_id,
+        writtenStatementDocumentId: documentId,
+      },
     }, tx);
   });
 }

@@ -110,6 +110,8 @@ export interface CaseReferralRow {
   writtenDueOn: string;
   writtenSentOn: string | null;
   writtenMethod: string | null;
+  /** The copy of the statement that went out, if one was kept. Migration 0018. */
+  writtenStatementDocumentId: string | null;
 }
 
 export async function listCases(
@@ -179,7 +181,8 @@ export async function getCase(
   const referrals = await query(
     `SELECT r.id, r.provider_id, r.referred_at, r.referred_by, r.outcome, r.outcome_note,
             p.full_name, d.id AS disclosure_id, d.disclosed_to, d.disclosed_at, d.method,
-            d.written_due_on, d.written_sent_on, d.written_method
+            d.written_due_on, d.written_sent_on, d.written_method,
+            d.written_statement_document_id
        FROM referrals r
        JOIN providers p ON p.id = r.provider_id
        JOIN disclosures d ON d.id = r.disclosure_id
@@ -274,6 +277,7 @@ export async function getCase(
       writtenDueOn: asDate(r.written_due_on) ?? '',
       writtenSentOn: asDate(r.written_sent_on),
       writtenMethod: (r.written_method as string) ?? null,
+      writtenStatementDocumentId: (r.written_statement_document_id as string) ?? null,
     })),
   };
 }

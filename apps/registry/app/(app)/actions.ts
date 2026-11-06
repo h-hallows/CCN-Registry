@@ -606,13 +606,28 @@ export async function markWrittenSentAction(
       caseId: form.get('caseId'),
     });
 
+    const upload = form.get('sentStatement');
+    const sentStatement = upload instanceof File && upload.size > 0
+      ? {
+        filename: upload.name,
+        contentType: upload.type,
+        bytes: Buffer.from(await upload.arrayBuffer()),
+      }
+      : undefined;
+
     await markWrittenStatementSent(
       ctx, parsed.disclosureId, parsed.sentOn, parsed.method, operator.displayName,
+      sentStatement,
     );
     revalidatePath(`/cases/${parsed.caseId}`);
     revalidatePath('/today');
     revalidatePath('/compliance');
-    return { ok: 'Written statement recorded as sent.' };
+    return {
+      ok: sentStatement
+        ? 'Recorded as sent, with a copy of what went out.'
+        : 'Written statement recorded as sent. No copy was attached, so the record '
+          + 'says it was sent and cannot produce it.',
+    };
   } catch (err) {
     return fail(messageOf(err));
   }

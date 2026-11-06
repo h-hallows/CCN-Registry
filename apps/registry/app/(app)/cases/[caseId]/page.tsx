@@ -442,12 +442,38 @@ export default async function CasePage({
                           <input id={`method-${r.id}`} name="method" className="input" required
                             placeholder="post, email, both" />
                         </div>
+                        <div>
+                          <label className="label" htmlFor={`copy-${r.id}`}>
+                            A copy of what you sent
+                          </label>
+                          <input id={`copy-${r.id}`} name="sentStatement" type="file"
+                            className="input"
+                            accept="application/pdf,image/jpeg,image/png,image/heic,image/tiff" />
+                        </div>
                       </div>
+                      <p className="mt-2 text-[0.6875rem] leading-relaxed"
+                        style={{ color: 'var(--ink-faint)' }}>
+                        Optional, and worth doing. Without it this record says a
+                        statement was sent and cannot produce it — § 1812.5095(f) is a
+                        thing somebody may ask you to show years from now. A copy
+                        attached here is filed against the case, shared with the family,
+                        and cannot be swapped afterwards.
+                      </p>
                     </ActionForm>
                   </div>
                 ) : (
                   <p className="mt-1 text-xs" style={{ color: 'var(--ink-faint)' }}>
-                    Sent by {r.writtenMethod ?? 'method not recorded'}.
+                    Sent by {r.writtenMethod ?? 'method not recorded'}.{' '}
+                    {r.writtenStatementDocumentId ? (
+                      <a href={`/documents/${r.writtenStatementDocumentId}`}
+                        className="underline underline-offset-4">
+                        A copy of what went out is on file.
+                      </a>
+                    ) : (
+                      <span style={{ color: 'var(--color-soon)' }}>
+                        No copy on file, so this record cannot produce what was sent.
+                      </span>
+                    )}
                   </p>
                 )}
 

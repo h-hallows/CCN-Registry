@@ -16,6 +16,7 @@ import {
   DocumentError, documentsFor, documentsForCase, fileDocument, readDocument,
   redactDocument, setDocumentVisibility,
 } from '@/lib/queries/documents';
+import { makeReferral, markWrittenStatementSent } from '@/lib/domain/referral';
 
 let db: DbHandle;
 let providerId: string;
@@ -299,5 +300,92 @@ describe('the download route', () => {
   it('requires an operator and records the read before returning bytes', () => {
     expect(route).toContain('requireOperator()');
     expect(route.indexOf('recordDownload')).toBeLessThan(route.indexOf('new NextResponse'));
+  });
+});
+
+/**
+ * The § 1812.5095(f) record and the copy of what it delivered. Core migration 0018.
+ *
+ * Both land together or neither does: a disclosure pointing at a document that failed
+ * to write, and a document filed against a delivery that rolled back, are each worse
+ * than no copy.
+ */
+describe('recording the written statement that went out', () => {
+  async function aFreshReferral(): Promise<{ disclosureId: string; caseId: string }> {
+    const [row] = await db.query<{ id: string; household_id: string; dm_name: string }>(
+      `SELECT c.id, c.household_id, h.dm_name
+         FROM cases c JOIN households h ON h.id = c.household_id
+        WHERE c.deleted_at IS NULL AND c.status <> 'ended' AND c.care = 'companion'
+        ORDER BY c.id LIMIT 1`);
+    const [p] = await db.query<{ id: string }>(
+      `SELECT id FROM providers WHERE status = 'active' AND deleted_at IS NULL
+        ORDER BY id LIMIT 1`);
+    const result = await makeReferral(TEST_CTX, {
+      caseId: row!.id,
+      providerId: p!.id,
+      disclosedTo: row!.dm_name,
+      disclosedBy: 'Operator',
+      method: 'phone',
+      spokenDisclosureGiven: true,
+    });
+    return { disclosureId: result.disclosureId, caseId: row!.id };
+  }
+
+  it('files the copy, links it, and shares it with the family', async () => {
+    const { disclosureId, caseId } = await aFreshReferral();
+    const body = pdf('the statement we posted');
+
+    await markWrittenStatementSent(
+      TEST_CTX, disclosureId, '2026-11-10', 'post', 'Operator',
+      { filename: 'statement.pdf', contentType: 'application/pdf', bytes: body },
+    );
+
+    const [disclosure] = await db.query<{
+      written_sent_on: string; written_statement_document_id: string | null;
+    }>(
+      `SELECT written_sent_on::text, written_statement_document_id
+         FROM disclosures WHERE id = $1`, [disclosureId]);
+    expect(disclosure!.written_sent_on).toBe('2026-11-10');
+    expect(disclosure!.written_statement_document_id).not.toBeNull();
+
+    const docs = (await documentsForCase(TEST_CTX, caseId, '00000000-0000-0000-0000-000000000000')).onTheCase;
+    const copy = docs.find((d) => d.id === disclosure!.written_statement_document_id);
+    expect(copy).toBeTruthy();
+    expect(copy!.kind).toBe('written_statement');
+    // They received it; a copy of their own statement is theirs to re-read.
+    expect(copy!.visibleToSubject).toBe(true);
+    expect(copy!.sha256Hex).toBe(hex(body));
+  });
+
+  it('records the delivery with no copy, rather than refusing it', async () => {
+    const { disclosureId } = await aFreshReferral();
+    await markWrittenStatementSent(
+      TEST_CTX, disclosureId, '2026-11-11', 'post', 'Operator');
+
+    const [disclosure] = await db.query<{
+      written_sent_on: string; written_statement_document_id: string | null;
+    }>(
+      `SELECT written_sent_on::text, written_statement_document_id
+         FROM disclosures WHERE id = $1`, [disclosureId]);
+    expect(disclosure!.written_sent_on).toBe('2026-11-11');
+    expect(disclosure!.written_statement_document_id).toBeNull();
+  });
+
+  it('a rejected file takes the delivery record with it', async () => {
+    /*
+     * The point of filing inside the same transaction. A delivery recorded alongside a
+     * document that did not write would be a reference to nothing; a document filed
+     * against a delivery that rolled back would be a copy of a statement nobody sent.
+     */
+    const { disclosureId } = await aFreshReferral();
+
+    await expect(markWrittenStatementSent(
+      TEST_CTX, disclosureId, '2026-11-12', 'post', 'Operator',
+      { filename: 'notes.docx', contentType: 'application/msword', bytes: pdf('x') },
+    )).rejects.toThrow(DocumentError);
+
+    const [disclosure] = await db.query<{ written_sent_on: string | null }>(
+      `SELECT written_sent_on::text FROM disclosures WHERE id = $1`, [disclosureId]);
+    expect(disclosure!.written_sent_on).toBeNull();
   });
 });
