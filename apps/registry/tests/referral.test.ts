@@ -10,7 +10,9 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { DbHandle } from '@h-hallows/core/db';
 import { caseIdWhere, expectRejection, providerIdByName, seededDb, TEST_CTX } from '@h-hallows/core/testing';
-import { makeReferral, ReferralError } from '@/lib/domain/referral';
+import {
+  endEngagement, makeReferral, markWrittenStatementSent, ReferralError,
+} from '@/lib/domain/referral';
 import { shortlistFor } from '@/lib/queries/match';
 
 let db: DbHandle;
@@ -76,7 +78,7 @@ describe('I3 — no referral without a disclosure, through the sanctioned path',
   it('refuses to record a referral unless the spoken disclosure is confirmed', async () => {
     const caseId = await caseIdWhere(db, `c.status = 'matching' AND c.care = 'overnight_newborn'`);
     const providerId = await providerIdByName(db, 'Rosalind Pham');
-    await expect(makeReferral({
+    await expect(makeReferral(TEST_CTX, {
       caseId, providerId, disclosedTo: 'Edith Shaw', disclosedBy: 'operator',
       method: 'phone', spokenDisclosureGiven: false,
     })).rejects.toThrow(ReferralError);
@@ -85,7 +87,7 @@ describe('I3 — no referral without a disclosure, through the sanctioned path',
   it('refuses to record a referral with no named recipient of the disclosure', async () => {
     const caseId = await caseIdWhere(db, `c.status = 'matching' AND c.care = 'overnight_newborn'`);
     const providerId = await providerIdByName(db, 'Rosalind Pham');
-    await expect(makeReferral({
+    await expect(makeReferral(TEST_CTX, {
       caseId, providerId, disclosedTo: '   ', disclosedBy: 'operator',
       method: 'phone', spokenDisclosureGiven: true,
     })).rejects.toThrow(/name of the person/i);
@@ -96,7 +98,7 @@ describe('I3 — no referral without a disclosure, through the sanctioned path',
     const providerId = await providerIdByName(db, 'Rosalind Pham');
     const before = await db.query<{ n: string }>(`SELECT count(*) AS n FROM disclosures`);
 
-    const result = await makeReferral({
+    const result = await makeReferral(TEST_CTX, {
       caseId, providerId, disclosedTo: 'Edith Shaw', disclosedBy: 'operator',
       method: 'phone', spokenDisclosureGiven: true, now: new Date('2026-10-24T17:00:00Z'),
     });
@@ -137,7 +139,7 @@ describe('I3 — no referral without a disclosure, through the sanctioned path',
     const beforeD = await db.query<{ n: string }>(`SELECT count(*) AS n FROM disclosures`);
     const beforeT = await db.query<{ n: string }>(`SELECT count(*) AS n FROM timeline_entries`);
     try {
-      await expect(makeReferral({
+      await expect(makeReferral(TEST_CTX, {
         caseId, providerId,
         disclosedTo: 'Someone', disclosedBy: 'operator', method: 'phone',
         spokenDisclosureGiven: true,
@@ -155,7 +157,7 @@ describe('I3 — no referral without a disclosure, through the sanctioned path',
 
     // And the same call succeeds once the probe is gone, so the failure above was the
     // trigger and not something the function refuses anyway.
-    const ok = await makeReferral({
+    const ok = await makeReferral(TEST_CTX, {
       caseId, providerId,
       disclosedTo: 'Someone', disclosedBy: 'operator', method: 'phone',
       spokenDisclosureGiven: true,
@@ -171,7 +173,7 @@ describe('I11 — a skilled case cannot be referred without an ordering physicia
       db, `c.care = 'hospice_support' AND h.physician_name IS NULL`,
     );
     const providerId = await providerIdByName(db, 'Priya Raghunathan');
-    await expect(makeReferral({
+    await expect(makeReferral(TEST_CTX, {
       caseId, providerId, disclosedTo: 'Ken Tanaka', disclosedBy: 'operator',
       method: 'phone', spokenDisclosureGiven: true,
     })).rejects.toThrow(/ordering physician/i);
@@ -185,5 +187,118 @@ describe('I4 — the registry cannot end a relationship', () => {
     for (const name of [...Object.keys(referral), ...Object.keys(providers)]) {
       expect(name).not.toMatch(/terminate|fire|dismiss|remove_provider/i);
     }
+  });
+});
+
+/**
+ * § 3.8: audit every write.
+ *
+ * The three mutations that carry the statutory record — the referral with its spoken
+ * disclosure, the written statement going out, and the engagement ending — wrote no
+ * audit_log row at all. `makeReferralAction` went as far as taking the audit context and
+ * discarding it with `void ctx`. The credential vault was audited, so "who touched this"
+ * answered for a TB clearance and not for the § 1812.5095(f) disclosure.
+ *
+ * Each row goes in inside the transaction that writes what it describes, so the log
+ * cannot record a referral that rolled back, or miss one that did not.
+ */
+describe('§ 3.8 — the writes that carry the record are audited', () => {
+  /**
+   * Referable, chosen from the database rather than named: a case that has not ended,
+   * whose household has an ordering physician so the I11 branch is satisfied whatever
+   * its care type is. Nothing stops a case being referred more than once — the code
+   * supports referring an alternate mid-engagement — so these need not be distinct.
+   */
+  async function referableCases(n: number): Promise<string[]> {
+    const rows = await db.query<{ id: string }>(
+      `SELECT c.id FROM cases c JOIN households h ON h.id = c.household_id
+        WHERE c.status <> 'ended' AND c.deleted_at IS NULL
+          AND h.physician_name IS NOT NULL
+        LIMIT $1`,
+      [n],
+    );
+    if (rows.length < n) throw new Error(`need ${n} referable cases, found ${rows.length}`);
+    return rows.map((r) => r.id);
+  }
+
+  it('records the referral and its disclosure against the operator', async () => {
+    const [caseId] = await referableCases(1);
+    const providerId = await providerIdByName(db, 'Rosalind Pham');
+
+    const result = await makeReferral(TEST_CTX, {
+      caseId: caseId!, providerId, disclosedTo: 'Audited Household',
+      disclosedBy: 'operator', method: 'in_person', spokenDisclosureGiven: true,
+    });
+
+    const [row] = await db.query<{ actor: string; action: string; diff: unknown }>(
+      `SELECT actor, action, diff FROM audit_log
+        WHERE entity = 'referral' AND entity_id = $1`,
+      [result.referralId],
+    );
+    expect(row).toBeDefined();
+    expect(row!.actor).toBe(TEST_CTX.actor);
+    expect(row!.action).toBe('create');
+    const diff = typeof row!.diff === 'string' ? JSON.parse(row!.diff) : row!.diff;
+    expect(diff.disclosureId).toBe(result.disclosureId);
+    expect(diff.disclosedTo).toBe('Audited Household');
+    expect(diff.writtenDueOn).toBe(result.writtenDueOn);
+  });
+
+  it('writes no audit row for a referral that rolled back', async () => {
+    const [caseId] = await referableCases(1);
+    const before = await db.query<{ n: string }>(
+      `SELECT count(*) AS n FROM audit_log WHERE entity = 'referral'`);
+
+    await expect(makeReferral(TEST_CTX, {
+      caseId: caseId!, providerId: '00000000-0000-0000-0000-000000000000',
+      disclosedTo: 'Nobody', disclosedBy: 'operator', method: 'phone',
+      spokenDisclosureGiven: true,
+    })).rejects.toThrow();
+
+    const after = await db.query<{ n: string }>(
+      `SELECT count(*) AS n FROM audit_log WHERE entity = 'referral'`);
+    expect(after[0]!.n).toBe(before[0]!.n);
+  });
+
+  it('records the written statement going out', async () => {
+    const [caseId] = await referableCases(1);
+    const providerId = await providerIdByName(db, 'Rosalind Pham');
+    const { disclosureId } = await makeReferral(TEST_CTX, {
+      caseId: caseId!, providerId, disclosedTo: 'Someone', disclosedBy: 'operator',
+      method: 'phone', spokenDisclosureGiven: true,
+    });
+
+    await markWrittenStatementSent(TEST_CTX, disclosureId, '2026-11-05', 'email', 'operator');
+
+    const [row] = await db.query<{ actor: string; action: string }>(
+      `SELECT actor, action FROM audit_log
+        WHERE entity = 'disclosure' AND entity_id = $1`,
+      [disclosureId],
+    );
+    expect(row).toBeDefined();
+    expect(row!.actor).toBe(TEST_CTX.actor);
+    expect(row!.action).toBe('update');
+  });
+
+  it('records the engagement ending, and who recorded it', async () => {
+    const [caseId] = await db.query<{ id: string }>(
+      `SELECT id FROM cases WHERE status = 'active' AND deleted_at IS NULL LIMIT 1`,
+    );
+
+    await endEngagement(TEST_CTX, {
+      caseId: caseId!.id, endedBy: 'household', endReason: 'care_no_longer_needed',
+      endedOn: '2026-11-05', actor: 'Operator Name',
+    });
+
+    const [row] = await db.query<{ actor: string; diff: unknown }>(
+      `SELECT actor, diff FROM audit_log WHERE entity = 'case' AND entity_id = $1
+        ORDER BY at DESC LIMIT 1`,
+      [caseId!.id],
+    );
+    expect(row).toBeDefined();
+    expect(row!.actor).toBe(TEST_CTX.actor);
+    const diff = typeof row!.diff === 'string' ? JSON.parse(row!.diff) : row!.diff;
+    expect(diff.endedBy).toBe('household');
+    expect(diff.recordedBy).toBe('Operator Name');
   });
 });

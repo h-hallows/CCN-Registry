@@ -174,7 +174,6 @@ export async function makeReferralAction(
   _prev: ActionState | undefined, form: FormData,
 ): Promise<ActionState> {
   const { operator, ctx } = await requireOperator();
-  void ctx;
   try {
     const parsed = z.object({
       caseId: uuid,
@@ -194,7 +193,7 @@ export async function makeReferralAction(
       note: form.get('note') ?? undefined,
     });
 
-    const result = await makeReferral({
+    const result = await makeReferral(ctx, {
       caseId: parsed.caseId,
       providerId: parsed.providerId,
       disclosedTo: parsed.disclosedTo,
@@ -217,7 +216,7 @@ export async function makeReferralAction(
 export async function markWrittenSentAction(
   _prev: ActionState | undefined, form: FormData,
 ): Promise<ActionState> {
-  const { operator } = await requireOperator();
+  const { operator, ctx } = await requireOperator();
   try {
     const parsed = z.object({
       disclosureId: uuid,
@@ -232,7 +231,7 @@ export async function markWrittenSentAction(
     });
 
     await markWrittenStatementSent(
-      parsed.disclosureId, parsed.sentOn, parsed.method, operator.displayName,
+      ctx, parsed.disclosureId, parsed.sentOn, parsed.method, operator.displayName,
     );
     revalidatePath(`/cases/${parsed.caseId}`);
     revalidatePath('/today');
@@ -257,7 +256,7 @@ const END_REASONS = [
 export async function endEngagementAction(
   _prev: ActionState | undefined, form: FormData,
 ): Promise<ActionState> {
-  const { operator } = await requireOperator();
+  const { operator, ctx } = await requireOperator();
   try {
     const parsed = z.object({
       caseId: uuid,
@@ -273,7 +272,7 @@ export async function endEngagementAction(
       note: form.get('note') ?? undefined,
     });
 
-    await endEngagement({ ...parsed, actor: operator.displayName });
+    await endEngagement(ctx, { ...parsed, actor: operator.displayName });
     revalidatePath(`/cases/${parsed.caseId}`);
     revalidatePath('/cases');
     revalidatePath('/today');

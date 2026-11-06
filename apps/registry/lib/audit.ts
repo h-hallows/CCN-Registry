@@ -9,7 +9,7 @@
  * Retention is currently unbounded — set a policy once counsel answers the HIPAA
  * question (COUNSEL.md question 4).
  */
-import { getDb } from '@h-hallows/core/db';
+import { getDb, type Tx } from '@h-hallows/core/db';
 
 export type AuditAction = 'read' | 'create' | 'update' | 'soft_delete';
 
@@ -26,9 +26,18 @@ export interface AuditRecord extends AuditContext {
   diff?: unknown;
 }
 
-export async function audit(record: AuditRecord): Promise<void> {
-  const { query } = await getDb();
-  await query(
+/**
+ * Record a write.
+ *
+ * `tx` is how a mutation writes its audit row inside its own transaction, so the log
+ * cannot disagree with what happened: for the referral and the disclosure this is the
+ * § 1812.5095 evidence, and a log that can be missing the entry for a write it describes
+ * is the weak version of it. Reads pass no tx — see auditRead, which must never block a
+ * read — but a write that matters should go in with the row it is about.
+ */
+export async function audit(record: AuditRecord, tx?: Tx): Promise<void> {
+  const run = tx ?? (await getDb());
+  await run.query(
     `INSERT INTO audit_log (actor, action, entity, entity_id, diff, ip, user_agent)
      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [

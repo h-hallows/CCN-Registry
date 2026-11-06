@@ -16,6 +16,7 @@
  */
 import type { Tx } from '@h-hallows/core/db';
 import { getDb } from '@h-hallows/core/db';
+import { audit, type AuditContext } from '@/lib/audit';
 import { emit } from '@/lib/metrics';
 import { asISODate, civilLA, eligibility, formatISODate, writtenStatementDueOn } from '@h-hallows/core/domain';
 import type { CredentialLike } from '@h-hallows/core/domain';
@@ -53,7 +54,10 @@ export interface MakeReferralResult {
 
 export class ReferralError extends Error {}
 
-export async function makeReferral(input: MakeReferralInput): Promise<MakeReferralResult> {
+export async function makeReferral(
+  ctx: AuditContext,
+  input: MakeReferralInput,
+): Promise<MakeReferralResult> {
   if (input.spokenDisclosureGiven !== true) {
     throw new ReferralError(
       'The spoken disclosure must be given and confirmed before a referral can be recorded.',
@@ -127,6 +131,27 @@ export async function makeReferral(input: MakeReferralInput): Promise<MakeReferr
 
     await emit('referral_made', { caseId: input.caseId, providerId: input.providerId },
       { method: input.method, writtenDueOn: writtenDue }, tx);
+
+    /**
+     * In the transaction, with the rows it describes. § 1812.5095(f) makes this the
+     * record that the spoken disclosure was given and when the written statement fell
+     * due; `metric_events` is instrumentation and is not that record.
+     */
+    await audit({
+      ...ctx,
+      action: 'create',
+      entity: 'referral',
+      entityId: referral.id,
+      diff: {
+        caseId: input.caseId,
+        providerId: input.providerId,
+        disclosureId: disclosure.id,
+        disclosedTo: input.disclosedTo.trim(),
+        disclosedBy: input.disclosedBy,
+        method: input.method,
+        writtenDueOn: writtenDue,
+      },
+    }, tx);
 
     return { referralId: referral.id, disclosureId: disclosure.id, writtenDueOn: writtenDue };
   });
@@ -213,6 +238,7 @@ export async function insertTimeline(
  * apart from these two fields (trg_disclosure_guard).
  */
 export async function markWrittenStatementSent(
+  ctx: AuditContext,
   disclosureId: string,
   sentOn: string,
   method: string,
@@ -233,6 +259,13 @@ export async function markWrittenStatementSent(
       body: `Written statement sent ${sentOn} by ${method}.`,
     });
     await tx.query(`UPDATE cases SET written_sent_on = $2 WHERE id = $1`, [row.case_id, sentOn]);
+    await audit({
+      ...ctx,
+      action: 'update',
+      entity: 'disclosure',
+      entityId: disclosureId,
+      diff: { writtenSentOn: sentOn, writtenMethod: method, caseId: row.case_id },
+    }, tx);
   });
 }
 
@@ -251,7 +284,7 @@ export type EndReasonCode =
   | 'moved_to_facility' | 'deceased' | 'cost' | 'household_dissatisfied'
   | 'provider_unavailable' | 'moved_to_another_agency' | 'other';
 
-export async function endEngagement(input: {
+export async function endEngagement(ctx: AuditContext, input: {
   caseId: string;
   endedBy: 'household' | 'provider' | 'mutual';
   endReason: EndReasonCode;
@@ -290,5 +323,21 @@ export async function endEngagement(input: {
     await emit('engagement_ended',
       { caseId: input.caseId, providerId: before.primary_provider_id },
       { endReason: input.endReason, endedBy: input.endedBy, weeks }, tx);
+
+    // I4: the registry did not end this. The log records who recorded it, and that the
+    // household, the provider or both are what ended it.
+    await audit({
+      ...ctx,
+      action: 'update',
+      entity: 'case',
+      entityId: input.caseId,
+      diff: {
+        status: { from: 'active', to: 'ended' },
+        endedOn: input.endedOn,
+        endedBy: input.endedBy,
+        endReason: input.endReason,
+        recordedBy: input.actor,
+      },
+    }, tx);
   });
 }
