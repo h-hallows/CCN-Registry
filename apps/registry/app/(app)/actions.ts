@@ -12,6 +12,7 @@
  */
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
+import { mailConfigured, sendMail } from '@h-hallows/core/mail';
 import { requireOperator } from '@/lib/operator';
 import { addNote, logCall } from '@/lib/queries/cases';
 import { saveShortlistToTimeline } from '@/lib/queries/match';
@@ -305,6 +306,37 @@ export async function addPartnerAction(
   }
 }
 
+/**
+ * Send the link, and say plainly which happened.
+ *
+ * The link is shown on screen whichever way this goes. The operator issued it
+ * deliberately and may want to send it themselves with a sentence of their own — and
+ * with no provider configured, handing it over is the only way it reaches anybody.
+ *
+ * Unlike the public sign-in form, saying "we could not send it" here leaks nothing: the
+ * operator is authenticated, chose the address, and is the person who has to do
+ * something about it.
+ */
+async function mailLink(
+  kind: PortalSubjectKind, email: string, url: string, expiresAt: string,
+): Promise<string> {
+  if (!mailConfigured()) return 'No mail provider is configured, so send them this link.';
+
+  const what = kind === 'partner' ? 'the referral screen' : 'your own screen';
+  const outcome = await sendMail({
+    to: email,
+    subject: 'Your sign-in link',
+    text:
+      `Here is your link to ${what}.\n\n${url}\n\n`
+      + `It works once and expires on ${expiresAt.slice(0, 10)}. `
+      + 'If you were not expecting this, nothing has happened and you can ignore it.',
+  });
+
+  return outcome.delivered
+    ? `Sent to ${email}.`
+    : `It could not be sent (${outcome.reason}) — send them this link.`;
+}
+
 function subjectKind(form: FormData): PortalSubjectKind {
   const kind = form.get('kind');
   if (!isPortalSubjectKind(kind)) throw new AccessError('Unknown portal.');
@@ -331,10 +363,11 @@ export async function grantAccessAction(
 
     const result = await grantPortalAccess(ctx, { kind, subjectId, email, displayName });
     revalidateSubject(kind, subjectId);
+    const sent = await mailLink(kind, email, result.url, result.expiresAt);
     return {
-      ok: result.existing
+      ok: (result.existing
         ? `A new link for ${email}. The previous one no longer works.`
-        : `${email} now has access. Send them this link.`,
+        : `${email} now has access.`) + ' ' + sent,
       copy: {
         label: `Sign-in link for ${email} — works once, expires ${result.expiresAt.slice(0, 10)}`,
         text: result.url,
@@ -352,8 +385,9 @@ export async function reissueLinkAction(
   try {
     const userId = uuid.parse(form.get('userId'));
     const result = await reissuePortalLink(ctx, userId);
+    const sent = await mailLink(result.kind, result.email, result.url, result.expiresAt);
     return {
-      ok: 'New link issued. The previous one no longer works.',
+      ok: `New link issued. The previous one no longer works. ${sent}`,
       copy: {
         label: `Sign-in link — works once, expires ${result.expiresAt.slice(0, 10)}`,
         text: result.url,

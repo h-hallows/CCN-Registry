@@ -18,7 +18,7 @@
     "db:seed": "node ../../scripts/core-script.mjs db/seed.ts"
   },
   "dependencies": {
-    "@h-hallows/core": "git+https://github.com/h-hallows/CCN-core.git#v0.1.11",
+    "@h-hallows/core": "git+https://github.com/h-hallows/CCN-core.git#v0.1.13",
     "drizzle-orm": "^0.36.4",
     "next": "^15.1.6",
     "react": "^19.0.0",

@@ -34,9 +34,11 @@ npm run db:up                   # Docker, port 5433
 # then set DATABASE_URL in .env and re-run db:reset && db:seed
 ```
 
-Sign-in is an email magic link restricted to the addresses in `OPERATOR_EMAILS`. In
-development the link is printed to the server console rather than emailed; wiring a mail
-provider is a deployment step.
+Sign-in is an email magic link restricted to the addresses in `OPERATOR_EMAILS`. Locally
+the link is printed to the server console, because there is nowhere else for it to go. In
+production it is sent, and if no mail provider is configured the page says signing in is
+unavailable rather than printing it: a log is not a place to put a bearer credential, and
+a sign-in link is one for fifteen minutes.
 
 ## Checks
 
@@ -123,6 +125,11 @@ Then:
 1. Set `OPERATOR_EMAILS` in the Vercel project. Nobody can sign in without it, and the
    sign-in form deliberately gives the same answer either way, so an empty value looks
    like success.
+1. Set `RESEND_API_KEY` and `MAIL_FROM` (a sender on a domain Resend has verified).
+   Without them **nobody can sign in at all** — in production the console mail driver
+   does not exist, so there is no link to copy out of the logs and none is printed. Set
+   `PORTAL_URL` too, so the portal links this console issues point at the right host; it
+   defaults to `http://localhost:3003`.
 2. Apply the schema from a machine that can reach the database — **there is no migration
    step in the deployment**, by design, so nothing can migrate a live database on a push:
 

@@ -155,6 +155,9 @@ export interface GrantResult {
   expiresAt: string;
   /** True when the account already existed and only a new link was issued. */
   existing: boolean;
+  /** So the caller can address the message without looking the account up again. */
+  kind: PortalSubjectKind;
+  email: string;
 }
 
 export async function grantPortalAccess(
@@ -276,6 +279,8 @@ export async function grantPortalAccess(
       url: `${portalOrigin()}/invite/${token}`,
       expiresAt: invite.expires_at,
       existing,
+      kind: input.kind,
+      email,
     };
   });
 }
@@ -346,6 +351,8 @@ export async function reissuePortalLink(
       url: `${portalOrigin()}/invite/${token}`,
       expiresAt: invite.expires_at,
       existing: true,
+      kind: user.role,
+      email: user.email,
     };
   });
 }
