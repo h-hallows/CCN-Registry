@@ -12,13 +12,13 @@
     "test": "vitest run",
     "lint:copy": "ccn-lint ./app ./components ./content",
     "pretest": "npm run lint:copy",
-    "db:deploy": "tsx node_modules/@h-hallows/core/src/db/migrate.ts",
-    "db:migrate": "tsx node_modules/@h-hallows/core/src/db/migrate.ts",
-    "db:reset": "tsx node_modules/@h-hallows/core/src/db/migrate.ts --reset",
-    "db:seed": "tsx node_modules/@h-hallows/core/src/db/seed.ts"
+    "db:deploy": "node ../../scripts/core-script.mjs db/migrate.ts",
+    "db:migrate": "node ../../scripts/core-script.mjs db/migrate.ts",
+    "db:reset": "node ../../scripts/core-script.mjs db/migrate.ts --reset",
+    "db:seed": "node ../../scripts/core-script.mjs db/seed.ts"
   },
   "dependencies": {
-    "@h-hallows/core": "git+https://github.com/h-hallows/CCN-core.git#v0.1.7",
+    "@h-hallows/core": "git+https://github.com/h-hallows/CCN-core.git#v0.1.11",
     "drizzle-orm": "^0.36.4",
     "next": "^15.1.6",
     "react": "^19.0.0",
