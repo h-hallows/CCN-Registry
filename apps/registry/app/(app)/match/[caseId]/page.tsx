@@ -23,12 +23,15 @@ export default async function MatchCasePage({
   const { ctx } = await requireOperator();
   const now = new Date();
 
-  const found = await getCase(ctx, caseId);
-  if (!found) notFound();
+  // The screen and the bench do not depend on each other, and neither depends on the
+  // case read beyond it existing — so all three go out together.
+  const [found, shortlist, benches] = await Promise.all([
+    getCase(ctx, caseId),
+    shortlistFor(ctx, caseId, now),
+    benchesFor(ctx, caseId),
+  ]);
+  if (!found || !shortlist) notFound();
   const { kase } = found;
-  const shortlist = await shortlistFor(ctx, caseId, now);
-  if (!shortlist) notFound();
-  const benches = await benchesFor(ctx, caseId);
   const live = benches.find((b) => !b.withdrawnAt) ?? null;
   const openRequests = live?.items.flatMap(
     (i) => i.requests.filter((r) => r.status === 'pending'),

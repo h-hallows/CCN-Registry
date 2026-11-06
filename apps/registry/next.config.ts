@@ -8,6 +8,13 @@ const nextConfig: NextConfig = {
    * its data directory.
    */
   serverExternalPackages: ['@electric-sql/pglite', 'pg'],
+  /**
+   * Documents are filed through a server action, and the default body limit for one is
+   * 1 MB. The database's own ceiling is 10 MB (migration 0015), and the two disagreeing
+   * would mean a scanned agreement failing with a framework error rather than with the
+   * message `fileDocument` writes.
+   */
+  experimental: { serverActions: { bodySizeLimit: '11mb' } },
   // @h-hallows/core ships TypeScript source with no build step (architecture spec § 2.2), so
   // Next has to compile it rather than treat it as a prebuilt dependency.
   transpilePackages: ['@h-hallows/core'],

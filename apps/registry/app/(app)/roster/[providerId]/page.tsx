@@ -7,6 +7,8 @@ import { LABEL, requiredFor } from '@h-hallows/core/domain';
 import { civilLA, formatISODate } from '@h-hallows/core/domain';
 import { setReferralStatusAction, upsertCredentialAction } from '@/app/(app)/actions';
 import { portalUsersFor } from '@/lib/domain/portalAccess';
+import { documentsFor } from '@/lib/queries/documents';
+import { Documents } from '@/components/Documents';
 import { PortalAccess } from '@/components/PortalAccess';
 import { ActionForm, Disclose } from '@/components/ActionForm';
 import { CredentialVaultFields } from '@/components/CredentialVaultFields';
@@ -28,8 +30,12 @@ export default async function ProviderPage({
   const { providerId } = await params;
   const { ctx } = await requireOperator();
   const today = new Date();
-  const standing = await getProviderWithStanding(ctx, providerId, today);
-  const portalUsers = await portalUsersFor(ctx, 'provider', providerId);
+  // Three independent reads; they were serial.
+  const [standing, portalUsers, docs] = await Promise.all([
+    getProviderWithStanding(ctx, providerId, today),
+    portalUsersFor(ctx, 'provider', providerId),
+    documentsFor(ctx, { kind: 'provider', id: providerId }),
+  ]);
   if (!standing) notFound();
 
   const { provider, credentials, eligibility, placements, avgEngagementWeeks } = standing;
@@ -277,6 +283,18 @@ export default async function ProviderPage({
             </table>
           </div>
         )}
+      </Section>
+
+      <Section
+        title="Documents on file"
+        blurb="The paperwork § 1812.5095 expects to exist. A signed-on date with nothing behind it cannot produce what was signed."
+      >
+        <Documents
+          subject={{ kind: 'provider', id: providerId }}
+          documents={docs}
+          defaultKind="registry_agreement"
+          shareLabel="them"
+        />
       </Section>
 
       <Section

@@ -121,14 +121,25 @@ was dynamic with nothing request-dependent.
 
 These are judgement calls for the business, not oversights.
 
-1. **No document storage.** The signed service agreement, invoices and the LTC claim
-   packet have no table. Both document screens say so rather than implying the list is
-   complete. The architecture spec's § 9 additions do not include one, so inventing a
-   store and its retention rules is a decision to take deliberately.
-2. **No mail provider.** Notifications write a row and log a line; sign-in links print
-   to the server log. In deployment that means anyone who can read function logs can
-   sign in as a permitted operator.
-3. **No file upload.** Credential submissions take a URL, not a file.
+1. ~~**No document storage.**~~ **Closed.** Core migrations 0015–0017. The bytes live in
+   Postgres behind the same row-level security as everything else, the database checks
+   the recorded SHA-256 against them, and a document is append-only apart from
+   redaction — which drops the file and keeps the row, the digest and the reason,
+   because append-only cannot un-leak a document filed against the wrong family.
+   Retention is deliberately unbounded while COUNSEL question 4 is open. Invoices and
+   the LTC claim packet remain absent and the screen still says so: both are downstream
+   of payments, which counsel question 3 blocks.
+2. ~~**No mail provider.** Notifications write a row and log a line; sign-in links print
+   to the server log.~~ **Closed.** `@h-hallows/core/mail` refuses to print in
+   production however it is asked, so an unconfigured deployment says signing in is
+   unavailable rather than leaking a bearer credential into a log drain. Needs
+   `RESEND_API_KEY` and `MAIL_FROM` set, and `MAIL_FROM` needs a verified domain — which
+   needs the trading name.
+3. ~~**No file upload.** Credential submissions take a URL, not a file.~~ **Closed.** A
+   provider hands in the document itself and the registry holds it. 0017 constrains
+   which document a submission may point at — the column 0015 added was unconstrained
+   by the 0008 policy, which is the write-to-read pattern arriving through a column
+   added later.
 4. ~~**The console is thinner than the platform** — 37 tests to 221. It also has no
    screen to publish a bench to a household or to see a household's request, so the
    portal request loop has no operator half; and `referrals.outcome` is displayed but
@@ -187,9 +198,9 @@ in this pass now construct the bug and check the gate catches it.
 
 | | |
 |---|---|
-| CCN-core | 13 migrations, 217 tests |
-| CCN-external | 221 tests, 34 routes |
-| CCN-Registry | 91 tests, 17 routes |
+| CCN-core | 17 migrations, 276 tests |
+| CCN-external | 240 tests, 36 routes |
+| CCN-Registry | 112 tests, 19 routes |
 | CI | every suite now runs twice — in-memory PGlite and a real Postgres 16 |
 
 CI previously ran only against PGlite, a WASM build that has already differed in ways
@@ -208,6 +219,8 @@ was never exercised on the engine it ships on. It is now.
 4. ~~Add `role` and `disabled_at` to the console's `getOperator()`.~~ Done.
 5. Point Vercel's Root Directory at `apps/registry`, then merge
    `restructure/workspaces` to `main`.
-6. Wire a mail provider. Now the sharper of the two: a portal sign-in link is handed to
-   the operator on screen to send by hand, which works and does not scale.
-7. Decide on document storage.
+6. ~~Wire a mail provider.~~ Done, in code. Set `RESEND_API_KEY` and `MAIL_FROM` — and
+   note that until they are set, **nobody can sign in to either application**, which is
+   deliberate: the alternative was a sign-in link in the function logs.
+7. ~~Decide on document storage.~~ Decided and built — see § 3.1.
+8. Have someone local read the crossed pages before they go live (§ 3.8).

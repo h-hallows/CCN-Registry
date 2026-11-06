@@ -6,6 +6,8 @@ import { getCase } from '@/lib/queries/cases';
 import { getProviderWithStanding } from '@/lib/queries/providers';
 import { benchesFor, feedbackForCase } from '@/lib/queries/bench';
 import { portalUsersFor } from '@/lib/domain/portalAccess';
+import { documentsForCase } from '@/lib/queries/documents';
+import { Documents } from '@/components/Documents';
 import { PortalAccess } from '@/components/PortalAccess';
 import { dueWording, URGENCY_LABEL } from '@/lib/domain/buckets';
 import { civilLA, formatISODate } from '@h-hallows/core/domain';
@@ -41,18 +43,25 @@ export default async function CasePage({
   const isSkilled = (SKILLED_CARE_TYPES as readonly string[]).includes(kase.care);
   const physicianMissing = isSkilled && !h.physicianName?.trim();
 
-  const benches = await benchesFor(ctx, caseId);
+  /*
+   * Six independent reads. They ran one after another, which on this screen — the
+   * densest in the console — meant the page could not start rendering until the last
+   * of six serial round trips came back. Nothing below depends on anything else below.
+   */
+  const [benches, feedback, portalUsers, docs, primary, alternates] = await Promise.all([
+    benchesFor(ctx, caseId),
+    feedbackForCase(ctx, caseId),
+    portalUsersFor(ctx, 'household', h.id),
+    documentsForCase(ctx, caseId, h.id),
+    kase.primaryProviderId
+      ? getProviderWithStanding(ctx, kase.primaryProviderId, now)
+      : Promise.resolve(null),
+    Promise.all(
+      kase.alternateProviderIds.map((id) => getProviderWithStanding(ctx, id, now)),
+    ),
+  ]);
   const liveBench = benches.find((b) => !b.withdrawnAt) ?? null;
   const pastBenches = benches.filter((b) => b.withdrawnAt);
-  const feedback = await feedbackForCase(ctx, caseId);
-  const portalUsers = await portalUsersFor(ctx, 'household', h.id);
-
-  const primary = kase.primaryProviderId
-    ? await getProviderWithStanding(ctx, kase.primaryProviderId, now)
-    : null;
-  const alternates = await Promise.all(
-    kase.alternateProviderIds.map((id) => getProviderWithStanding(ctx, id, now)),
-  );
   const eligibleAlternates = alternates.filter((a) => a?.eligibility.eligible).length;
 
   const dmLocal = h.dmTimezone
@@ -492,6 +501,30 @@ export default async function CasePage({
             ))}
           </div>
         )}
+      </Section>
+
+      <Section
+        title="Documents on this case"
+        blurb="What the record points at. Every file downloads rather than opening in the page, and nothing here can be edited once filed."
+      >
+        <Documents
+          subject={{ kind: 'case', id: kase.id }}
+          documents={docs.onTheCase}
+          defaultKind="written_statement"
+          shareLabel="the family"
+        />
+      </Section>
+
+      <Section
+        title="Documents on the household"
+        blurb="Filed against the family rather than this case, so they follow them across cases."
+      >
+        <Documents
+          subject={{ kind: 'household', id: h.id }}
+          documents={docs.onTheHousehold}
+          defaultKind="nurse_disclosure"
+          shareLabel="the family"
+        />
       </Section>
 
       <Section

@@ -1,6 +1,6 @@
 import { requireOperator } from '@/lib/operator';
 import { listPartners } from '@/lib/queries/partners';
-import { portalUsersFor } from '@/lib/domain/portalAccess';
+import { portalUsersForMany } from '@/lib/domain/portalAccess';
 import { addPartnerAction } from '@/app/(app)/actions';
 import { ActionForm, Disclose } from '@/components/ActionForm';
 import { PortalAccess } from '@/components/PortalAccess';
@@ -20,10 +20,13 @@ export default async function PartnersPage() {
   const { ctx } = await requireOperator();
   const partners = await listPartners(ctx);
 
-  const withUsers = await Promise.all(partners.map(async (p) => ({
+  // One read for every partner's accounts, not one per partner.
+  const usersByPartner = await portalUsersForMany(
+    ctx, 'partner', partners.map((p) => p.id));
+  const withUsers = partners.map((p) => ({
     partner: p,
-    users: await portalUsersFor(ctx, 'partner', p.id),
-  })));
+    users: usersByPartner.get(p.id) ?? [],
+  }));
 
   const sent = partners.reduce((n, p) => n + p.sent, 0);
   const became = partners.reduce((n, p) => n + p.became, 0);

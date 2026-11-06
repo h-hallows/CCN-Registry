@@ -12,6 +12,7 @@
  * provider another file has already renewed a credential for would make the eligibility
  * assertions below depend on file order.
  */
+import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { DbHandle } from '@h-hallows/core/db';
 import { expectRejection, providerIdByName, seededDb, TEST_CTX } from '@h-hallows/core/testing';
@@ -59,13 +60,30 @@ async function lvnMissingLiveScan(name: string): Promise<string> {
 async function submit(
   providerId: string,
   type: CredentialType,
-  claims: { identifier?: string; documentUrl?: string; note?: string } = {},
+  claims: {
+    identifier?: string; documentUrl?: string; note?: string; documentId?: string;
+  } = {},
 ): Promise<string> {
   const [row] = await db.query<{ id: string }>(
-    `INSERT INTO credential_submissions (provider_id, type, identifier, document_url, note)
-     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+    `INSERT INTO credential_submissions
+       (provider_id, type, identifier, document_url, note, document_id)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
     [providerId, type, claims.identifier ?? null, claims.documentUrl ?? null,
-      claims.note ?? null],
+      claims.note ?? null, claims.documentId ?? null],
+  );
+  return row!.id;
+}
+
+/** A credential document the provider handed in, as the portal would file it. */
+async function handInDocument(providerId: string, text: string): Promise<string> {
+  const bytes = Buffer.from(`%PDF-1.4 ${text}`);
+  const [row] = await db.query<{ id: string }>(
+    `INSERT INTO documents (kind, provider_id, filename, content_type, byte_size,
+                            sha256_hex, bytes, uploaded_by)
+     VALUES ('credential', $1, 'handed-in.pdf', 'application/pdf', $2, $3, $4, 'provider')
+     RETURNING id`,
+    [providerId, bytes.length,
+      createHash('sha256').update(bytes).digest('hex'), bytes],
   );
   return row!.id;
 }
@@ -132,6 +150,56 @@ describe('the queue shows what was handed in, and marks it as unverified', () =>
 });
 
 describe('accepting', () => {
+  it('carries the handed-in document onto the credential it produces', async () => {
+    /*
+     * The point of holding the file rather than a link: years later, the credential can
+     * produce the paper it was verified against, unchanged and with a digest the
+     * database checked. A credential whose document_id is null after an accept is a
+     * verification nobody can re-examine.
+     */
+    const providerId = await lvnMissingLiveScan('Document Carried Tester');
+    const documentId = await handInDocument(providerId, 'DOJ live scan result');
+    const submissionId = await submit(providerId, 'live_scan', { documentId });
+
+    const result = await acceptSubmission(TEST_CTX, {
+      submissionId,
+      identifier: 'DOJ-7788',
+      expiresOn: null,
+      verifiedOn: d(0),
+      verificationSource: 'CA DOJ subsequent arrest notification',
+    });
+
+    const [credential] = await db.query<{ document_id: string | null }>(
+      `SELECT document_id FROM credentials WHERE id = $1`, [result.credentialId]);
+    expect(credential!.document_id).toBe(documentId);
+  });
+
+  it('a renewal with no document does not erase the one already on file', async () => {
+    const providerId = await lvnMissingLiveScan('Document Kept Tester');
+    const first = await handInDocument(providerId, 'the first TB clearance');
+    await acceptSubmission(TEST_CTX, {
+      submissionId: await submit(providerId, 'tb_clearance', { documentId: first }),
+      identifier: null,
+      expiresOn: d(300),
+      verifiedOn: d(0),
+      verificationSource: 'Clinic',
+    });
+
+    // A renewal reported by phone, with nothing attached.
+    const renewed = await acceptSubmission(TEST_CTX, {
+      submissionId: await submit(providerId, 'tb_clearance', {}),
+      identifier: null,
+      expiresOn: d(600),
+      verifiedOn: d(0),
+      verificationSource: 'Clinic, by phone',
+    });
+    expect(renewed.renewed).toBe(true);
+
+    const [credential] = await db.query<{ document_id: string | null }>(
+      `SELECT document_id FROM credentials WHERE id = $1`, [renewed.credentialId]);
+    expect(credential!.document_id).toBe(first);
+  });
+
   it('creates exactly one credentials row and leaves the submission pointing at it', async () => {
     const providerId = await lvnMissingLiveScan('Accept Once Tester');
     const submissionId = await submit(providerId, 'live_scan', { identifier: 'CLAIMED-999' });

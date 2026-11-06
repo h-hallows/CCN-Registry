@@ -19,13 +19,20 @@ const NAV = [
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const { operator, ctx } = await requireOperator();
-  const today = await getToday(ctx);
-  // The queue is only useful if its size is visible from every screen: a document that
-  // sits unreviewed is a provider who stays off a shortlist they may well belong on.
-  const pendingSubmissions = await countPendingSubmissions();
-  // A household waiting on an answer is the one queue with a person at the other end of
-  // it, so its size travels with the operator the same way.
-  const pendingRequestCount = await countPendingRequests();
+  /*
+   * Three independent reads, and this layout renders on every screen — so running them
+   * one after another put three serial round trips in front of every page in the
+   * console, before the page's own queries had started.
+   *
+   * The queue sizes are only useful if they are visible from everywhere: a document
+   * that sits unreviewed is a provider who stays off a shortlist they belong on, and a
+   * household waiting on an answer is the one queue with a person at the other end.
+   */
+  const [today, pendingSubmissions, pendingRequestCount] = await Promise.all([
+    getToday(ctx),
+    countPendingSubmissions(),
+    countPendingRequests(),
+  ]);
 
   async function endSession() {
     'use server';

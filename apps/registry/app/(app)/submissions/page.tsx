@@ -81,15 +81,34 @@ export default async function SubmissionsPage() {
                   <div>
                     <dt className="label">Document</dt>
                     <dd>
-                      {s.documentUrl ? (
+                      {/*
+                        * The document the registry holds, first. A `document_url` only
+                        * appears on rows written before migration 0015 — a link rots,
+                        * and can be edited after the check that relied on it, so it is
+                        * marked as what it is rather than presented as equivalent.
+                        */}
+                      {s.documentId ? (
                         <a
-                          href={s.documentUrl}
-                          target="_blank"
-                          rel="noreferrer noopener"
+                          href={`/documents/${s.documentId}`}
                           className="underline underline-offset-2"
                         >
-                          Open the document
+                          {s.documentName ?? 'Download what they sent'}
                         </a>
+                      ) : s.documentUrl ? (
+                        <>
+                          <a
+                            href={s.documentUrl}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            className="underline underline-offset-2"
+                          >
+                            Open the link they gave
+                          </a>
+                          <span className="block text-[0.6875rem]"
+                            style={{ color: 'var(--color-soon)' }}>
+                            A link, not a copy we hold. It can change after you check it.
+                          </span>
+                        </>
                       ) : (
                         <span style={{ color: 'var(--ink-faint)' }}>None attached</span>
                       )}

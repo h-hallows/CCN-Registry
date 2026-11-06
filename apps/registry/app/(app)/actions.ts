@@ -24,6 +24,10 @@ import {
   restorePortalAccess, revokePortalAccess, type PortalSubjectKind,
 } from '@/lib/domain/portalAccess';
 import { addPartner, PartnerError } from '@/lib/queries/partners';
+import {
+  DocumentError, fileDocument, redactDocument, setDocumentVisibility,
+  type DocumentKind, type Subject,
+} from '@/lib/queries/documents';
 import { setProviderReferralStatus, upsertCredential } from '@/lib/queries/providers';
 import {
   endEngagement, makeReferral, markWrittenStatementSent, recordReferralOutcome,
@@ -58,6 +62,7 @@ function messageOf(err: unknown): string {
   if (err instanceof BenchError) return err.message;
   if (err instanceof AccessError) return err.message;
   if (err instanceof PartnerError) return err.message;
+  if (err instanceof DocumentError) return err.message;
   if (err instanceof SubmissionError) return err.message;
   if (err instanceof z.ZodError) return err.issues[0]?.message ?? 'Check the form.';
   if (err instanceof Error) return err.message;
@@ -271,6 +276,109 @@ export async function resolveRequestAction(
  * The issued link comes back in `copy` and goes nowhere else — not to the log, not to the
  * audit diff. Until a mail provider is wired, the operator sends it.
  */
+const DOCUMENT_KIND = z.enum([
+  'credential', 'registry_agreement', 'written_notice', 'written_statement',
+  'nurse_disclosure', 'correspondence', 'other',
+]);
+
+function documentSubject(form: FormData): Subject {
+  const kind = z.enum(['provider', 'household', 'case']).parse(form.get('subjectKind'));
+  return { kind, id: uuid.parse(form.get('subjectId')) } as Subject;
+}
+
+function revalidateDocumentSubject(subject: Subject): void {
+  if (subject.kind === 'provider') revalidatePath(`/roster/${subject.id}`);
+  if (subject.kind === 'case') revalidatePath(`/cases/${subject.id}`);
+  if (subject.kind === 'household') revalidatePath('/cases');
+}
+
+/**
+ * File a document.
+ *
+ * `visible_to_subject` is an explicit, un-prechecked box and defaults to off: filing
+ * something is not the same as showing it to the family, and the operator's diligence
+ * record is not theirs to read (I12).
+ */
+export async function fileDocumentAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const subject = documentSubject(form);
+    const kind = DOCUMENT_KIND.parse(form.get('kind')) as DocumentKind;
+    const note = z.string().trim().max(300).optional().parse(form.get('note') || undefined);
+    const credentialId = form.get('credentialId')
+      ? uuid.parse(form.get('credentialId'))
+      : undefined;
+
+    const upload = form.get('file');
+    if (!(upload instanceof File) || upload.size === 0) {
+      return fail('Choose a file.');
+    }
+    const bytes = Buffer.from(await upload.arrayBuffer());
+
+    const result = await fileDocument(ctx, {
+      subject,
+      kind,
+      filename: upload.name,
+      contentType: upload.type,
+      bytes,
+      note,
+      credentialId,
+      visibleToSubject: form.get('visibleToSubject') === 'yes',
+    });
+
+    revalidateDocumentSubject(subject);
+    return {
+      ok: result.duplicateOf
+        ? 'Filed. The same file is already on this record — both are kept.'
+        : 'Filed.',
+      copy: {
+        label: `SHA-256 of ${upload.name}`,
+        text: result.sha256Hex,
+      },
+    };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+export async function setDocumentVisibilityAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const subject = documentSubject(form);
+    const documentId = uuid.parse(form.get('documentId'));
+    const visible = form.get('visible') === 'yes';
+    await setDocumentVisibility(ctx, documentId, visible);
+    revalidateDocumentSubject(subject);
+    return { ok: visible ? 'They can see it now.' : 'No longer shared with them.' };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+/**
+ * Drop the bytes and keep the record. The only destructive act in this console, and it
+ * exists because append-only cannot un-leak a document filed against the wrong family.
+ */
+export async function redactDocumentAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const subject = documentSubject(form);
+    const documentId = uuid.parse(form.get('documentId'));
+    const reason = z.string().trim().min(3, 'Record why.').parse(form.get('reason'));
+    await redactDocument(ctx, documentId, reason);
+    revalidateDocumentSubject(subject);
+    return { ok: 'Redacted. The file is gone; the record that it existed is not.' };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
 /**
  * Add a referral partner. A name, an organisation and a way to reach them.
  *

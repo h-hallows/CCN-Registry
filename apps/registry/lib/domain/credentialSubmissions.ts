@@ -84,6 +84,7 @@ interface SubmissionRow {
   type: CredentialType;
   state: 'submitted' | 'accepted' | 'rejected';
   document_url: string | null;
+  document_id: string | null;
 }
 
 /**
@@ -122,7 +123,7 @@ export async function acceptSubmission(
   const handle = await getDb();
   const result = await handle.transaction(async (tx): Promise<AcceptSubmissionResult> => {
     const [submission] = await tx.query<SubmissionRow>(
-      `SELECT id, provider_id, type, state, document_url
+      `SELECT id, provider_id, type, state, document_url, document_id
          FROM credential_submissions
         WHERE id = $1
         FOR UPDATE`,
@@ -166,12 +167,15 @@ export async function acceptSubmission(
                 verified_by = $6, verification_source = $7, document_url = $8, notes = $9,
                 inspected_at = COALESCE($10, inspected_at),
                 inspected_by = COALESCE($11, inspected_by),
-                inspected_expiry_noted = COALESCE($12, inspected_expiry_noted)
+                inspected_expiry_noted = COALESCE($12, inspected_expiry_noted),
+                -- The paper this renewal was verified against. COALESCE so a submission
+                -- that came in without one does not erase the document already on file.
+                document_id = COALESCE($13, document_id)
           WHERE id = $1`,
         [existing.id, input.identifier ?? null, input.issuedOn ?? null,
           input.expiresOn ?? null, input.verifiedOn, ctx.actor, input.verificationSource,
           submission.document_url, input.notes ?? null,
-          inspectedAt, inspectedBy, inspectedExpiry],
+          inspectedAt, inspectedBy, inspectedExpiry, submission.document_id],
       );
       await tx.query(
         `INSERT INTO credential_events
@@ -189,13 +193,13 @@ export async function acceptSubmission(
         `INSERT INTO credentials
            (provider_id, type, identifier, issued_on, expires_on, verified_on,
             verified_by, verification_source, document_url, notes,
-            inspected_at, inspected_by, inspected_expiry_noted)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+            inspected_at, inspected_by, inspected_expiry_noted, document_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
          RETURNING id`,
         [submission.provider_id, submission.type, input.identifier ?? null,
           input.issuedOn ?? null, input.expiresOn ?? null, input.verifiedOn, ctx.actor,
           input.verificationSource, submission.document_url, input.notes ?? null,
-          inspectedAt, inspectedBy, inspectedExpiry],
+          inspectedAt, inspectedBy, inspectedExpiry, submission.document_id],
       );
       if (!created) throw new SubmissionError('Could not record the credential.');
       await tx.query(

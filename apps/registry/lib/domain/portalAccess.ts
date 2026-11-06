@@ -141,6 +141,59 @@ export async function portalUsersFor(
   }));
 }
 
+/**
+ * The same read for many subjects at once.
+ *
+ * `/partners` rendered one `portalUsersFor` per partner — a five-table read per row,
+ * serially, on a screen whose whole job is to list them. Fifteen partners was sixteen
+ * round trips before the page could start.
+ */
+export async function portalUsersForMany(
+  ctx: AuditContext,
+  kind: PortalSubjectKind,
+  subjectIds: string[],
+): Promise<Map<string, PortalUser[]>> {
+  const out = new Map<string, PortalUser[]>(subjectIds.map((id) => [id, []]));
+  if (subjectIds.length === 0) return out;
+
+  const map = MEMBERSHIP[kind];
+  const { query } = await getDb();
+  const rows = await query<{
+    subject_id: string; id: string; email: string; display_name: string;
+    last_seen_at: string | null; disabled_at: string | null;
+    live_expires_at: string | null; accepted_at: string | null;
+  }>(
+    `SELECT m.${map.column} AS subject_id,
+            u.id, u.email, u.display_name, u.last_seen_at::text, u.disabled_at::text,
+            (SELECT max(i.expires_at) FROM portal_invites i
+              WHERE i.email = u.email AND i.accepted_at IS NULL
+                AND i.revoked_at IS NULL AND i.expires_at > now())::text AS live_expires_at,
+            (SELECT max(i.accepted_at) FROM portal_invites i
+              WHERE i.email = u.email)::text AS accepted_at
+       FROM ${map.membership} m
+       JOIN users u ON u.id = m.user_id
+      WHERE m.${map.column} = ANY($1::uuid[])
+      ORDER BY u.email`,
+    [subjectIds],
+  );
+
+  await auditRead(ctx, 'portal_user');
+
+  for (const r of rows) {
+    out.get(r.subject_id)?.push({
+      userId: r.id,
+      email: r.email,
+      displayName: r.display_name,
+      role: kind,
+      lastSeenAt: r.last_seen_at,
+      disabledAt: r.disabled_at,
+      liveInviteExpiresAt: r.live_expires_at,
+      acceptedAt: r.accepted_at,
+    });
+  }
+  return out;
+}
+
 export interface GrantInput {
   kind: PortalSubjectKind;
   subjectId: string;

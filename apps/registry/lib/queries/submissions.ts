@@ -21,6 +21,9 @@ interface SubmissionBase {
   /** What the provider says the identifier is. Checked by the operator; believed by nobody until then. */
   claimedIdentifier: string | null;
   documentUrl: string | null;
+  /** Migration 0015: a document the registry holds, rather than a link that rots. */
+  documentId: string | null;
+  documentName: string | null;
   note: string | null;
   submittedAt: string;
 }
@@ -38,10 +41,12 @@ export async function listPendingSubmissions(
   const rows = await query<{
     id: string; provider_id: string; full_name: string; provider_type: ProviderType;
     type: CredentialType; identifier: string | null; document_url: string | null;
+    document_id: string | null; document_name: string | null;
     note: string | null; submitted_at: string; renews_existing: boolean;
   }>(
     `SELECT s.id, s.provider_id, p.full_name, p.type AS provider_type, s.type,
             s.identifier, s.document_url, s.note, s.submitted_at,
+            s.document_id, d.filename AS document_name,
             EXISTS (
               SELECT 1 FROM credentials c
                WHERE c.provider_id = s.provider_id AND c.type = s.type
@@ -49,6 +54,7 @@ export async function listPendingSubmissions(
             ) AS renews_existing
        FROM credential_submissions s
        JOIN providers p ON p.id = s.provider_id
+       LEFT JOIN documents d ON d.id = s.document_id AND d.redacted_at IS NULL
       WHERE s.state = 'submitted'
       ORDER BY s.submitted_at ASC`,
   );
@@ -64,6 +70,8 @@ export async function listPendingSubmissions(
     label: LABEL[r.type] ?? r.type,
     claimedIdentifier: r.identifier ?? null,
     documentUrl: r.document_url ?? null,
+    documentId: r.document_id ?? null,
+    documentName: r.document_name ?? null,
     note: r.note ?? null,
     submittedAt: asTimestamp(r.submitted_at),
     renewsExisting: Boolean(r.renews_existing),
@@ -96,15 +104,18 @@ export async function listReviewedSubmissions(
   const rows = await query<{
     id: string; provider_id: string; full_name: string; provider_type: ProviderType;
     type: CredentialType; identifier: string | null; document_url: string | null;
+    document_id: string | null; document_name: string | null;
     note: string | null; submitted_at: string; state: 'accepted' | 'rejected';
     reviewed_at: string; reviewed_by: string; review_note: string | null;
     credential_id: string | null;
   }>(
     `SELECT s.id, s.provider_id, p.full_name, p.type AS provider_type, s.type,
             s.identifier, s.document_url, s.note, s.submitted_at, s.state,
+            s.document_id, d.filename AS document_name,
             s.reviewed_at, s.reviewed_by, s.review_note, s.credential_id
        FROM credential_submissions s
        JOIN providers p ON p.id = s.provider_id
+       LEFT JOIN documents d ON d.id = s.document_id AND d.redacted_at IS NULL
       WHERE s.state <> 'submitted'
       ORDER BY s.reviewed_at DESC
       LIMIT $1`,
@@ -122,6 +133,8 @@ export async function listReviewedSubmissions(
     label: LABEL[r.type] ?? r.type,
     claimedIdentifier: r.identifier ?? null,
     documentUrl: r.document_url ?? null,
+    documentId: r.document_id ?? null,
+    documentName: r.document_name ?? null,
     note: r.note ?? null,
     submittedAt: asTimestamp(r.submitted_at),
     state: r.state,

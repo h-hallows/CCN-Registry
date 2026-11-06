@@ -1,0 +1,303 @@
+/**
+ * Filing a document in the console.
+ *
+ * The database half — that a row cannot lie about its bytes, that nothing can rewrite
+ * one, that redaction keeps the record — is in @h-hallows/core's own suite, so it cannot
+ * be weakened in one app without the other noticing. What is here is the behaviour of
+ * the code that writes through those constraints, and the two decisions the operator
+ * makes that the database cannot: what a file is, and whether the subject sees it.
+ */
+import { createHash, randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { beforeAll, describe, expect, it } from 'vitest';
+import type { DbHandle } from '@h-hallows/core/db';
+import { seededDb, TEST_CTX } from '@h-hallows/core/testing';
+import {
+  DocumentError, documentsFor, documentsForCase, fileDocument, readDocument,
+  redactDocument, setDocumentVisibility,
+} from '@/lib/queries/documents';
+
+let db: DbHandle;
+let providerId: string;
+let caseId: string;
+let householdId: string;
+
+const pdf = (text: string) => Buffer.from(`%PDF-1.4\n${text}`);
+const hex = (b: Buffer) => createHash('sha256').update(b).digest('hex');
+
+beforeAll(async () => {
+  db = await seededDb();
+  const [p] = await db.query<{ id: string }>(
+    `SELECT id FROM providers WHERE deleted_at IS NULL ORDER BY id LIMIT 1`);
+  providerId = p!.id;
+  const [c] = await db.query<{ id: string; household_id: string }>(
+    `SELECT id, household_id FROM cases WHERE deleted_at IS NULL ORDER BY id LIMIT 1`);
+  caseId = c!.id;
+  householdId = c!.household_id;
+});
+
+describe('filing one', () => {
+  it('holds the file, records the digest, and says what it filed on the timeline', async () => {
+    const body = pdf('the signed registry agreement');
+    const before = await db.query(
+      `SELECT 1 FROM timeline_entries WHERE case_id = $1 AND type = 'document'`, [caseId]);
+
+    const result = await fileDocument(TEST_CTX, {
+      subject: { kind: 'case', id: caseId },
+      kind: 'written_statement',
+      filename: 'statement.pdf',
+      contentType: 'application/pdf',
+      bytes: body,
+      note: 'Posted first class.',
+    });
+
+    expect(result.sha256Hex).toBe(hex(body));
+    expect(result.duplicateOf).toBeNull();
+
+    const held = await readDocument(result.id);
+    expect(held!.bytes.equals(body)).toBe(true);
+    expect(held!.contentType).toBe('application/pdf');
+
+    const after = await db.query<{ body: string }>(
+      `SELECT body FROM timeline_entries
+        WHERE case_id = $1 AND type = 'document' ORDER BY at DESC`, [caseId]);
+    expect(after.length).toBe(before.length + 1);
+    expect(after[0]!.body).toContain('statement.pdf');
+  });
+
+  it('audits the digest and never the bytes', async () => {
+    const body = pdf('a scan that should not be in the log');
+    const result = await fileDocument(TEST_CTX, {
+      subject: { kind: 'provider', id: providerId },
+      kind: 'registry_agreement',
+      filename: 'agreement.pdf',
+      contentType: 'application/pdf',
+      bytes: body,
+    });
+
+    const [row] = await db.query<{ diff: unknown }>(
+      `SELECT diff FROM audit_log
+        WHERE entity = 'document' AND entity_id = $1 AND action = 'create'`,
+      [result.id]);
+    const diff = JSON.stringify(row!.diff);
+    expect(diff).toContain(hex(body));
+    expect(diff).not.toContain('should not be in the log');
+    expect(diff).toContain('agreement.pdf');
+  });
+
+  it('is not shared with the subject unless the operator says so', async () => {
+    const quiet = await fileDocument(TEST_CTX, {
+      subject: { kind: 'provider', id: providerId },
+      kind: 'other',
+      filename: 'notes.pdf',
+      contentType: 'application/pdf',
+      bytes: pdf('operator notes'),
+    });
+    const shared = await fileDocument(TEST_CTX, {
+      subject: { kind: 'provider', id: providerId },
+      kind: 'registry_agreement',
+      filename: 'countersigned.pdf',
+      contentType: 'application/pdf',
+      bytes: pdf('countersigned'),
+      visibleToSubject: true,
+    });
+
+    const docs = await documentsFor(TEST_CTX, { kind: 'provider', id: providerId });
+    expect(docs.find((d) => d.id === quiet.id)!.visibleToSubject).toBe(false);
+    expect(docs.find((d) => d.id === shared.id)!.visibleToSubject).toBe(true);
+  });
+
+  it('refuses a file type it does not keep, and says which', async () => {
+    await expect(fileDocument(TEST_CTX, {
+      subject: { kind: 'provider', id: providerId },
+      kind: 'other',
+      filename: 'macro.docx',
+      contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      bytes: Buffer.from('PK'),
+    })).rejects.toThrow(DocumentError);
+  });
+
+  it('refuses an empty file and one over the ceiling, before the database has to', async () => {
+    await expect(fileDocument(TEST_CTX, {
+      subject: { kind: 'provider', id: providerId },
+      kind: 'other',
+      filename: 'empty.pdf',
+      contentType: 'application/pdf',
+      bytes: Buffer.alloc(0),
+    })).rejects.toThrow(/empty/i);
+
+    await expect(fileDocument(TEST_CTX, {
+      subject: { kind: 'provider', id: providerId },
+      kind: 'other',
+      filename: 'huge.pdf',
+      contentType: 'application/pdf',
+      bytes: randomBytes(10 * 1024 * 1024 + 1),
+    })).rejects.toThrow(/10 MB/);
+  });
+
+  it('refuses a subject that does not exist', async () => {
+    await expect(fileDocument(TEST_CTX, {
+      subject: { kind: 'case', id: '00000000-0000-0000-0000-000000000000' },
+      kind: 'other',
+      filename: 'x.pdf',
+      contentType: 'application/pdf',
+      bytes: pdf('x'),
+    })).rejects.toThrow(/does not exist/);
+  });
+
+  it('reports the same file filed twice rather than refusing it', async () => {
+    const body = pdf('the same scan, twice');
+    const first = await fileDocument(TEST_CTX, {
+      subject: { kind: 'household', id: householdId },
+      kind: 'correspondence',
+      filename: 'letter.pdf',
+      contentType: 'application/pdf',
+      bytes: body,
+    });
+    const second = await fileDocument(TEST_CTX, {
+      subject: { kind: 'household', id: householdId },
+      kind: 'correspondence',
+      filename: 'letter-again.pdf',
+      contentType: 'application/pdf',
+      bytes: body,
+    });
+
+    expect(second.duplicateOf).toBe(first.id);
+    // Both are kept. The operator decides; the screen says so.
+    const docs = await documentsFor(TEST_CTX, { kind: 'household', id: householdId });
+    expect(docs.filter((d) => d.sha256Hex === hex(body))).toHaveLength(2);
+  });
+});
+
+describe('reading them back', () => {
+  it('keeps a case\'s documents apart from the household\'s on one screen', async () => {
+    const onCase = await fileDocument(TEST_CTX, {
+      subject: { kind: 'case', id: caseId },
+      kind: 'written_statement',
+      filename: 'case.pdf',
+      contentType: 'application/pdf',
+      bytes: pdf('about this case'),
+    });
+    const onHousehold = await fileDocument(TEST_CTX, {
+      subject: { kind: 'household', id: householdId },
+      kind: 'nurse_disclosure',
+      filename: 'household.pdf',
+      contentType: 'application/pdf',
+      bytes: pdf('about the family'),
+    });
+
+    const split = await documentsForCase(TEST_CTX, caseId, householdId);
+    expect(split.onTheCase.some((d) => d.id === onCase.id)).toBe(true);
+    expect(split.onTheCase.some((d) => d.id === onHousehold.id)).toBe(false);
+    expect(split.onTheHousehold.some((d) => d.id === onHousehold.id)).toBe(true);
+  });
+
+  it('never drags the bytes into a list', async () => {
+    const docs = await documentsFor(TEST_CTX, { kind: 'provider', id: providerId });
+    expect(docs.length).toBeGreaterThan(0);
+    for (const doc of docs) {
+      expect(Object.keys(doc)).not.toContain('bytes');
+    }
+  });
+
+  it('records opening one separately from listing them', async () => {
+    const filed = await fileDocument(TEST_CTX, {
+      subject: { kind: 'provider', id: providerId },
+      kind: 'credential',
+      filename: 'livescan.pdf',
+      contentType: 'application/pdf',
+      bytes: pdf('live scan result'),
+    });
+
+    const before = await db.query(
+      `SELECT 1 FROM audit_log WHERE entity = 'document_bytes' AND entity_id = $1`,
+      [filed.id]);
+    expect(before).toHaveLength(0);
+
+    const { recordDownload } = await import('@/lib/queries/documents');
+    await recordDownload(TEST_CTX, filed.id);
+
+    const after = await db.query(
+      `SELECT 1 FROM audit_log WHERE entity = 'document_bytes' AND entity_id = $1`,
+      [filed.id]);
+    expect(after).toHaveLength(1);
+  });
+});
+
+describe('sharing and redacting', () => {
+  it('turns sharing on and off, and refuses a no-op', async () => {
+    const filed = await fileDocument(TEST_CTX, {
+      subject: { kind: 'case', id: caseId },
+      kind: 'written_statement',
+      filename: 'share.pdf',
+      contentType: 'application/pdf',
+      bytes: pdf('the statement'),
+    });
+
+    await expect(setDocumentVisibility(TEST_CTX, filed.id, false))
+      .rejects.toThrow(/Already not shared/);
+    await setDocumentVisibility(TEST_CTX, filed.id, true);
+    await expect(setDocumentVisibility(TEST_CTX, filed.id, true))
+      .rejects.toThrow(/Already shared/);
+    await setDocumentVisibility(TEST_CTX, filed.id, false);
+
+    const [row] = await db.query<{ visible_to_subject: boolean }>(
+      `SELECT visible_to_subject FROM documents WHERE id = $1`, [filed.id]);
+    expect(row!.visible_to_subject).toBe(false);
+  });
+
+  it('redaction destroys the file and keeps everything else', async () => {
+    const body = pdf('filed against the wrong family');
+    const filed = await fileDocument(TEST_CTX, {
+      subject: { kind: 'case', id: caseId },
+      kind: 'correspondence',
+      filename: 'misfiled.pdf',
+      contentType: 'application/pdf',
+      bytes: body,
+    });
+
+    await expect(redactDocument(TEST_CTX, filed.id, ' '))
+      .rejects.toThrow(/why/i);
+
+    await redactDocument(TEST_CTX, filed.id, 'Belonged to another family.');
+
+    // Gone from the download path entirely.
+    expect(await readDocument(filed.id)).toBeNull();
+
+    const docs = (await documentsForCase(TEST_CTX, caseId, householdId)).onTheCase;
+    const row = docs.find((d) => d.id === filed.id);
+    expect(row).toBeTruthy();
+    expect(row!.redactedAt).not.toBeNull();
+    expect(row!.sha256Hex).toBe(hex(body));
+    expect(row!.redactionReason).toBe('Belonged to another family.');
+
+    await expect(redactDocument(TEST_CTX, filed.id, 'again'))
+      .rejects.toThrow(/already redacted/);
+    await expect(setDocumentVisibility(TEST_CTX, filed.id, true))
+      .rejects.toThrow(/redacted/);
+  });
+});
+
+describe('the download route', () => {
+  const route = readFileSync('app/(app)/documents/[documentId]/route.ts', 'utf8');
+
+  /*
+   * A source-level assertion, because the failure it guards against is invisible at
+   * runtime: an inline PDF renders perfectly and also runs in this console's origin,
+   * where the operator holds a live session. A provider hands in the "scan".
+   */
+  it('always serves an attachment, and never offers an inline preview', () => {
+    expect(route).toContain('attachment; filename=');
+    expect(route).not.toMatch(/['"`]inline/);
+    expect(route).toContain("'x-content-type-options': 'nosniff'");
+  });
+
+  it('strips quotes and newlines out of a filename before it reaches a header', () => {
+    expect(route).toMatch(/replace\(\/\[.*\\r\\n\]\/g/);
+  });
+
+  it('requires an operator and records the read before returning bytes', () => {
+    expect(route).toContain('requireOperator()');
+    expect(route.indexOf('recordDownload')).toBeLessThan(route.indexOf('new NextResponse'));
+  });
+});
