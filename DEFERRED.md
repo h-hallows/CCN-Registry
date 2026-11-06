@@ -37,15 +37,33 @@ What ships instead: an eligible list the operator can sort by the signals that a
 fraction, prior engagement with this household, continuity average. Each column is the
 raw number. No composite total is computed or displayed.
 
-## Out of scope for V1 (§ 9)
+## Out of scope when § 9 was written, and built since
 
-Public website · client portal · provider portal · payments, invoicing or trust ledger ·
-LTC claim packet generator · reviews or ratings · messaging · mobile app · automated
-primary-source verification · referral partner portal · analytics beyond § 8.
+§ 9 put the public website, the client portal, the provider portal and the referral
+partner portal out of scope for V1. All four exist, in
+[CCN-external](https://github.com/h-hallows/CCN-external), along with the operator half
+of each loop in this repository. The list below is what is still genuinely absent.
 
-Payments are additionally blocked by counsel question 3 — § 687.2(h) requires that
-provider payments not come from the agency's business accounts, which is an
-account-structure decision, not a code decision.
+**Payments, invoicing and the trust ledger.** Blocked by counsel question 3: § 687.2(h)
+requires that provider payments not come from the agency's business accounts, which is
+an account-structure decision and not a code one. The LTC claim packet and invoices are
+downstream of it, and the household's documents screen names both rather than quietly
+omitting them.
+
+**Reviews or ratings.** Not deferred — refused. I7 and § 687.2(e) allow feedback to
+inform future referral decisions and nothing else, and a rating attached to a provider
+is the thing that turns a referral service into something that supervises.
+
+**Messaging.** No inbox, no threads. A registry that relays messages between a household
+and a provider starts to look like it coordinates the work.
+
+**A mobile app.** Both surfaces are responsive; nothing needs a store listing.
+
+**Automated primary-source verification.** A credential is verified by a person checking
+the issuing body, and `verification_source` records which one. Automating it would mean
+trusting a scraper with the thing households are relying on.
+
+**Analytics beyond § 8.** The funnel and the capacity measure, nothing else.
 
 ## Not a code task — spec § 0.5 items 1, 3, 4
 

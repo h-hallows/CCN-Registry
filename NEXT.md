@@ -40,7 +40,13 @@ their feedback lands on the case.
 | Nine-factor audit | The console's scheduling and coverage surface only | Counsel + operator |
 | A business telephone number or street address | Every public page — § 1812.533(b)(2) | Operator |
 | A Postgres | Both deployments. The console still reports `not_configured`. | Operator |
-| Vercel Root Directory → `apps/registry` | Merging `restructure/workspaces` | Operator |
+| A mail provider — `RESEND_API_KEY` and `MAIL_FROM` | **Signing in to either application.** `MAIL_FROM` needs a verified domain, so this waits on the trading name too. | Operator, after counsel |
 | One week of tallies | Nothing technical — it decides what gets funded next | Operator |
 
 No domain purchased. No wordmark drawn.
+
+`restructure/workspaces` was merged to `main` on 2026-11-06; `main` is the workspace
+layout and the branch is gone. `vercel.json` at the repository root sets the build
+command and output directory, so the deployment does not need a Root Directory set in
+the dashboard — if Vercel ever disagrees, setting it to `apps/registry` is the fallback
+and nothing else has to change.

@@ -228,8 +228,10 @@ was never exercised on the engine it ships on. It is now.
 2. Counsel: the trading name. Blocks all marketing.
 3. Set the three Vercel variables and redeploy.
 4. ~~Add `role` and `disabled_at` to the console's `getOperator()`.~~ Done.
-5. Point Vercel's Root Directory at `apps/registry`, then merge
-   `restructure/workspaces` to `main`.
+5. ~~Point Vercel's Root Directory at `apps/registry`, then merge
+   `restructure/workspaces` to `main`.~~ Merged. `vercel.json` at the repository root
+   carries the build command and output directory instead, so the dashboard setting is
+   a fallback rather than a prerequisite.
 6. ~~Wire a mail provider.~~ Done, in code. Set `RESEND_API_KEY` and `MAIL_FROM` — and
    note that until they are set, **nobody can sign in to either application**, which is
    deliberate: the alternative was a sign-in link in the function logs.

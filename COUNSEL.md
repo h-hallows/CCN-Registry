@@ -19,7 +19,7 @@ healthcare attorney before capital is committed.*
 
 | # | Question | Blocks |
 |---|---|---|
-| 8 | **Approve the § 1812.533(b)(4) residence disclosure and the § 1812.5095(d) provider notice.** The statute gives required content and two quoted phrases but not full wording. Both are drafts in `apps/web/content/statutory/`, marked `draft`, and the code refuses to deliver them. | Every nursing referral. |
+| 8 | **Approve the § 1812.533(b)(4) residence disclosure and the § 1812.5095(d) provider notice.** The statute gives required content and two quoted phrases but not full wording. Both are drafts in `CCN-external/content/statutory/`, marked `draft`, and the code refuses to deliver them. | Every nursing referral. |
 | 9 | Which chapter governs a given referral — § 1812.5095 or §§ 1812.524–1812.533 — and is the superset default the right posture, or does giving a domestic-worker disclosure on a nursing referral create a different problem? | The disclosure flow. Built as the superset for now. |
 | 10 | **Does § 1812.531's fee-splitting prohibition bar any compensation, cash or otherwise, to referring physicians, surgical practices, hospitals or hospital-employed discharge planners?** Does it reach care managers and estate attorneys, who are not enumerated? Where LTC or VA dollars are involved, does federal anti-kickback or Stark attach? | Monetising the partner programme. Built with **no compensation mechanic and no column that could hold one**. |
 | 11 | What form and delivery method does the § 1812.533(b)(4) residence disclosure require, and does "before they are under the care of any nursing personnel" permit delivery at the first shift, or must it precede it? | The status gate's trigger point. Built to block the case going active. |
