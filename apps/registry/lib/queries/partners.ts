@@ -123,3 +123,128 @@ export async function addPartner(
 
   return { id: row.id };
 }
+
+export interface UnattributedReferral {
+  inquiryId: string;
+  receivedAt: string;
+  contactName: string;
+  careType: string | null;
+  area: string | null;
+  urgency: string | null;
+  handled: boolean;
+  /** What the sender typed about themselves. Not evidence of who they are. */
+  claimedName: string | null;
+  claimedOrg: string | null;
+  claimedEmail: string | null;
+  patientInitials: string | null;
+  /** A partner whose recorded email matches what was typed. A suggestion, not a match. */
+  suggestedPartnerId: string | null;
+  suggestedPartnerName: string | null;
+}
+
+/**
+ * Partner referrals that belong to nobody yet.
+ *
+ * A signed-in partner's referral is attributed when it arrives. One sent from the
+ * public form is not, and must not be: the email in that form is typed by whoever is
+ * filling it in, and `inquiries.partner_id` is what decides who may read the outcome
+ * later — so matching on it would let anybody claim another partner's referrals by
+ * knowing their address.
+ *
+ * The match is offered rather than applied. An operator who recognises the name
+ * attaches it; the database only suggests where a recorded email is identical.
+ */
+export async function unattributedReferrals(
+  ctx: AuditContext,
+): Promise<UnattributedReferral[]> {
+  const { query } = await getDb();
+  const rows = await query<{
+    id: string; received_at: string; name: string; care_type: string | null;
+    area: string | null; urgency: string | null; handled: boolean;
+    claimed_name: string | null; claimed_org: string | null; claimed_email: string | null;
+    initials: string | null; suggested_id: string | null; suggested_name: string | null;
+  }>(
+    `SELECT i.id, i.received_at::text, i.name, i.care_type::text, i.area,
+            i.urgency::text, (i.handled_at IS NOT NULL) AS handled,
+            i.referrer ->> 'partnerName'     AS claimed_name,
+            i.referrer ->> 'partnerOrg'      AS claimed_org,
+            i.referrer ->> 'partnerEmail'    AS claimed_email,
+            i.referrer ->> 'patientInitials' AS initials,
+            p.id   AS suggested_id,
+            p.name AS suggested_name
+       FROM inquiries i
+       LEFT JOIN referral_partners p
+         ON lower(p.email) = lower(i.referrer ->> 'partnerEmail')
+      WHERE i.partner_id IS NULL
+        AND i.referrer IS NOT NULL
+      ORDER BY i.received_at DESC
+      LIMIT 50`,
+  );
+
+  if (rows.length > 0) await auditRead(ctx, 'unattributed_referral');
+
+  return rows.map((r) => ({
+    inquiryId: r.id,
+    receivedAt: r.received_at,
+    contactName: r.name,
+    careType: r.care_type,
+    area: r.area,
+    urgency: r.urgency,
+    handled: r.handled,
+    claimedName: r.claimed_name,
+    claimedOrg: r.claimed_org,
+    claimedEmail: r.claimed_email,
+    patientInitials: r.initials,
+    suggestedPartnerId: r.suggested_id,
+    suggestedPartnerName: r.suggested_name,
+  }));
+}
+
+/**
+ * Attach a referral to the partner who sent it.
+ *
+ * This grants a read: `partner_referrals()` is scoped by `partner_id`, so from here on
+ * that partner can see this referral and — once the household consents — its outcome.
+ * Set once, and the audit row records who decided.
+ */
+export async function attachReferralToPartner(
+  ctx: AuditContext,
+  inquiryId: string,
+  partnerId: string,
+): Promise<{ partnerName: string }> {
+  const handle = await getDb();
+  return handle.transaction(async (tx) => {
+    const [inquiry] = await tx.query<{ partner_id: string | null; name: string }>(
+      `SELECT partner_id, name FROM inquiries WHERE id = $1`, [inquiryId],
+    );
+    if (!inquiry) throw new PartnerError('That referral does not exist.');
+    if (inquiry.partner_id) {
+      throw new PartnerError('That referral is already attached to a partner.');
+    }
+
+    const [partner] = await tx.query<{ name: string }>(
+      `SELECT name FROM referral_partners WHERE id = $1`, [partnerId],
+    );
+    if (!partner) throw new PartnerError('That partner does not exist.');
+
+    await tx.query(
+      `UPDATE inquiries SET partner_id = $2 WHERE id = $1 AND partner_id IS NULL`,
+      [inquiryId, partnerId],
+    );
+
+    await audit({
+      ...ctx,
+      action: 'update',
+      entity: 'inquiry',
+      entityId: inquiryId,
+      diff: {
+        partnerId: { from: null, to: partnerId },
+        partnerName: partner.name,
+        // What it grants, said in the log rather than inferred from it later.
+        grants: 'this partner may now see this referral and, with household consent, its outcome',
+      },
+    }, tx);
+
+    return { partnerName: partner.name };
+  });
+}

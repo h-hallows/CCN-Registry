@@ -23,7 +23,7 @@ import {
   AccessError, grantPortalAccess, isPortalSubjectKind, reissuePortalLink,
   restorePortalAccess, revokePortalAccess, type PortalSubjectKind,
 } from '@/lib/domain/portalAccess';
-import { addPartner, PartnerError } from '@/lib/queries/partners';
+import { addPartner, attachReferralToPartner, PartnerError } from '@/lib/queries/partners';
 import {
   DocumentError, fileDocument, redactDocument, setDocumentVisibility,
   type DocumentKind, type Subject,
@@ -276,6 +276,32 @@ export async function resolveRequestAction(
  * The issued link comes back in `copy` and goes nowhere else — not to the log, not to the
  * audit diff. Until a mail provider is wired, the operator sends it.
  */
+/**
+ * Attach a referral that arrived from the public form to the partner who sent it.
+ *
+ * Deliberately an operator's decision. The email on the form is typed by whoever filled
+ * it in, and `partner_id` is what decides who may read the outcome later — so a match
+ * on that address is offered as a suggestion and never applied on its own.
+ */
+export async function attachReferralAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const inquiryId = uuid.parse(form.get('inquiryId'));
+    const partnerId = uuid.parse(form.get('partnerId'));
+    const { partnerName } = await attachReferralToPartner(ctx, inquiryId, partnerId);
+    revalidatePath('/partners');
+    revalidatePath('/today');
+    return {
+      ok: `Attached to ${partnerName}. They can see it on their own page now, and the `
+        + 'outcome once the family says we may share it.',
+    };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
 const DOCUMENT_KIND = z.enum([
   'credential', 'registry_agreement', 'written_notice', 'written_statement',
   'nurse_disclosure', 'correspondence', 'other',

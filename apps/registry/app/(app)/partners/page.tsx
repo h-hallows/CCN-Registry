@@ -1,7 +1,7 @@
 import { requireOperator } from '@/lib/operator';
-import { listPartners } from '@/lib/queries/partners';
+import { listPartners, unattributedReferrals } from '@/lib/queries/partners';
 import { portalUsersForMany } from '@/lib/domain/portalAccess';
-import { addPartnerAction } from '@/app/(app)/actions';
+import { addPartnerAction, attachReferralAction } from '@/app/(app)/actions';
 import { ActionForm, Disclose } from '@/components/ActionForm';
 import { PortalAccess } from '@/components/PortalAccess';
 import { Empty, Section, shortDate } from '@/components/ui';
@@ -18,7 +18,10 @@ export const dynamic = 'force-dynamic';
  */
 export default async function PartnersPage() {
   const { ctx } = await requireOperator();
-  const partners = await listPartners(ctx);
+  const [partners, loose] = await Promise.all([
+    listPartners(ctx),
+    unattributedReferrals(ctx),
+  ]);
 
   // One read for every partner's accounts, not one per partner.
   const usersByPartner = await portalUsersForMany(
@@ -80,6 +83,88 @@ export default async function PartnersPage() {
           </div>
         </Section>
       ))}
+
+      {/*
+        * Referrals that arrived from the public form and belong to nobody yet.
+        *
+        * Attaching one grants a read: `partner_referrals()` is scoped by partner_id, so
+        * from here on that partner sees this referral and, once the family consents,
+        * its outcome. That is why the email on the form is a suggestion and not a
+        * match — it is typed by whoever filled the form in.
+        */}
+      <Section
+        title={loose.length > 0
+          ? `Referrals waiting to be attached — ${loose.length}`
+          : 'Nothing waiting to be attached'}
+        blurb="Sent from the public form by somebody who was not signed in. Attaching one lets that partner follow it on their own page, so do it when you recognise the sender and not before."
+      >
+        {loose.length === 0 ? (
+          <Empty>
+            Every partner referral so far was sent by somebody signed in, so it was
+            attributed as it arrived.
+          </Empty>
+        ) : (
+          <ul className="divide-y hair-soft">
+            {loose.map((r) => (
+              <li key={r.inquiryId} className="px-4 py-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                  <div className="text-sm">
+                    <span className="font-medium">
+                      {r.claimedName ?? 'Somebody'}
+                    </span>
+                    {r.claimedOrg ? (
+                      <span style={{ color: 'var(--ink-soft)' }}> · {r.claimedOrg}</span>
+                    ) : null}
+                    <span className="ml-2 text-xs" style={{ color: 'var(--ink-faint)' }}>
+                      {r.claimedEmail ?? 'no email given'}
+                    </span>
+                  </div>
+                  <span className="text-xs" style={{ color: 'var(--ink-faint)' }}>
+                    {shortDate(r.receivedAt)}
+                    {r.handled ? ' · already handled' : ' · not yet handled'}
+                  </span>
+                </div>
+
+                <p className="mt-0.5 text-xs" style={{ color: 'var(--ink-soft)' }}>
+                  about {r.patientInitials ?? 'a patient'} · we call {r.contactName}
+                  {r.area ? ` · ${r.area.replace(/_/g, ' ')}` : null}
+                </p>
+
+                <div className="mt-2">
+                  <ActionForm
+                    action={attachReferralAction}
+                    submitLabel="Attach it"
+                    confirm="This lets that partner see this referral, and its outcome once the family agrees. Continue?"
+                  >
+                    <input type="hidden" name="inquiryId" value={r.inquiryId} />
+                    <label className="label" htmlFor={`who-${r.inquiryId}`}>
+                      Who sent it
+                    </label>
+                    <select id={`who-${r.inquiryId}`} name="partnerId" className="select"
+                      required defaultValue={r.suggestedPartnerId ?? ''}>
+                      <option value="" disabled>Choose a partner</option>
+                      {partners.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.org ? `${p.name} — ${p.org}` : p.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-2 text-[0.6875rem] leading-relaxed"
+                      style={{ color: 'var(--ink-faint)' }}>
+                      {r.suggestedPartnerName
+                        ? `The email matches ${r.suggestedPartnerName}, so that one is `
+                          + 'selected. Check it is really them — the address was typed '
+                          + 'into a public form.'
+                        : 'No partner on the list has that email. Add them below first '
+                          + 'if they belong on it.'}
+                    </p>
+                  </ActionForm>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
 
       <Section
         title="Add a partner"
