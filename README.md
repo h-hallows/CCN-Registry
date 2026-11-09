@@ -40,6 +40,26 @@ production it is sent, and if no mail provider is configured the page says signi
 unavailable rather than printing it: a log is not a place to put a bearer credential, and
 a sign-in link is one for fifteen minutes.
 
+### Getting in before mail is wired
+
+Resend needs a verified domain, which needs the trading name, which is with counsel —
+and waiting for a lawyer in order to look at your own software is the wrong shape of
+problem. So a link can be minted from a machine that can reach the database:
+
+```bash
+DATABASE_URL=... OPERATOR_EMAILS=you@example.com \
+  npm run operator:link -- you@example.com https://your-console.vercel.app
+```
+
+The same two rows the login form writes, written from a terminal. The link is printed
+where you ran it, good for twelve hours and usable once, and only its hash is stored.
+The address has to be in `OPERATOR_EMAILS` or the script refuses, because a link the
+deployment will not accept fails at the last step for no visible reason.
+
+This is deliberately not a button on the deployment. The login form accepts any address
+and says nothing about whether it is permitted — showing the link there would let anyone
+who guessed an operator's address sign in as them.
+
 ## Checks
 
 ```bash
