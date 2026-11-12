@@ -2,7 +2,9 @@ import { requireOperator } from '@/lib/operator';
 import { recentlyHandled, unhandledInquiries } from '@/lib/queries/intake';
 import { convertInquiryAction, turnAwayInquiryAction } from '@/app/(app)/actions';
 import { ActionForm, Disclose } from '@/components/ActionForm';
-import { CARE_LABEL, Empty, RowLink, Section, shortDateTime } from '@/components/ui';
+import {
+  Banner, CARE_LABEL, Empty, RowLink, Section, shortDateTime,
+} from '@/components/ui';
 import { URGENCY_LABEL } from '@/lib/domain/buckets';
 
 export const dynamic = 'force-dynamic';
@@ -67,7 +69,7 @@ export default async function Intake() {
           blurb={[
             q.urgency ? URGENCY_LABEL[q.urgency] ?? q.urgency : 'No urgency given',
             q.careType ? CARE_LABEL[q.careType] ?? q.careType : 'Care type not stated',
-            q.area ?? 'area not stated',
+            q.areaLabel || 'area not stated',
             `received ${shortDateTime(q.receivedAt)}`,
           ].join(' · ')}
         >
@@ -130,6 +132,20 @@ export default async function Intake() {
 
             {/* What the registry will record, which is a different thing. */}
             <div className="px-4 py-4">
+              {q.providersCoveringArea === 0 ? (
+                <div className="mb-4">
+                  <Banner
+                    tone="note"
+                    title={q.areaLabel
+                      ? `Nobody on the roster covers ${q.areaLabel}`
+                      : 'No area was given'}
+                  >
+                    You can still open it — an area is a starting point and the roster
+                    changes. But if this is outside where you work, turning it away now
+                    is kinder than a household with a case nobody can be matched to.
+                  </Banner>
+                </div>
+              ) : null}
               <ActionForm
                 action={convertInquiryAction}
                 submitLabel="Open as a case"
@@ -179,8 +195,15 @@ export default async function Intake() {
                   </div>
                   <div>
                     <label className="label" htmlFor={`area-${q.id}`}>Area</label>
+                    {/*
+                      * The label, not the slug the form submitted. `cr_area` is
+                      * compared to `providers.areas` by string equality, so a
+                      * household stored as `santa_monica` matches nobody, ever — and
+                      * an empty shortlist is a legitimate answer, so nothing would
+                      * distinguish that from "we have no one there".
+                      */}
                     <input id={`area-${q.id}`} name="crArea" className="input" required
-                      defaultValue={q.area ?? ''} />
+                      defaultValue={q.areaLabel} />
                   </div>
                   <div>
                     <label className="label" htmlFor={`care-${q.id}`}>Care</label>

@@ -208,3 +208,61 @@ describe('turning one away', () => {
       .rejects.toThrow(/already dealt with/);
   });
 });
+
+/**
+ * The area a household is stored under.
+ *
+ * `cr_area` is compared to `providers.areas` by string equality. The public form
+ * submits a slug; the roster holds what an operator typed. Carrying the slug straight
+ * across produces a household that matches nobody, ever — and an empty shortlist is a
+ * legitimate answer, so nothing on any screen distinguishes that from "we have no one
+ * there".
+ */
+describe('where the household is recorded as being', () => {
+  it('hands the screen a label, never the slug the form submitted', async () => {
+    const id = await arrive({ area: 'santa_monica' });
+    const row = (await unhandledInquiries(TEST_CTX)).find((q) => q.id === id);
+    expect(row!.areaLabel).toBe('Santa Monica');
+  });
+
+  it('leaves an area an operator wrote exactly as they wrote it', async () => {
+    const id = await arrive({ area: 'La Cañada' });
+    const row = (await unhandledInquiries(TEST_CTX)).find((q) => q.id === id);
+    expect(row!.areaLabel).toBe('La Cañada');
+  });
+
+  it('says how many providers cover it, so a dead end is visible beforehand', async () => {
+    const covered = await one<{ area: string }>(
+      `SELECT a AS area FROM providers p, unnest(p.areas) a
+        WHERE p.status = 'active' AND p.deleted_at IS NULL LIMIT 1`);
+
+    const yes = await arrive({ area: covered.area });
+    const no = await arrive({ area: 'santa_monica' });
+    const rows = await unhandledInquiries(TEST_CTX);
+
+    expect(rows.find((q) => q.id === yes)!.providersCoveringArea).toBeGreaterThan(0);
+    // The seeded roster is the San Gabriel Valley and the public form offers the
+    // Westside, so this is zero — which is the state the banner exists to show.
+    expect(rows.find((q) => q.id === no)!.providersCoveringArea).toBe(0);
+  });
+
+  it('a household created through the screen can be matched on its area', async () => {
+    /*
+     * The end-to-end version: convert with the label the screen offers, and the
+     * matcher finds the same providers it would for a seeded household in that area.
+     */
+    const covered = await one<{ area: string }>(
+      `SELECT a AS area FROM providers p, unnest(p.areas) a
+        WHERE p.status = 'active' AND p.deleted_at IS NULL LIMIT 1`);
+    const id = await arrive({ area: covered.area, care_type: 'companion' });
+    const row = (await unhandledInquiries(TEST_CTX)).find((q) => q.id === id);
+
+    const result = await convertInquiry(TEST_CTX, {
+      ...CONVERT, inquiryId: id, care: 'companion', crArea: row!.areaLabel,
+    });
+
+    const { shortlistFor } = await import('@/lib/queries/match');
+    const shortlist = await shortlistFor(TEST_CTX, result.caseId);
+    expect(shortlist!.eligible.length).toBeGreaterThan(0);
+  });
+});

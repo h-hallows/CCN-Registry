@@ -20,6 +20,7 @@ import { audit, auditRead, type AuditContext } from '@/lib/audit';
 import { emit } from '@/lib/metrics';
 import { insertTimeline } from '@/lib/domain/referral';
 import type { CareType, UrgencyValue } from '@h-hallows/core/schema';
+import { areaLabel } from '@h-hallows/core/domain';
 
 export class IntakeError extends Error {}
 
@@ -44,6 +45,13 @@ export interface InquiryRow {
   handledAt: string | null;
   handledBy: string | null;
   householdId: string | null;
+  /** The area as a person would write it, which is how the roster stores it. */
+  areaLabel: string;
+  /**
+   * Active providers who list that area. Zero means this enquiry cannot be matched
+   * today — which is worth knowing before a household is created, not after.
+   */
+  providersCoveringArea: number;
 }
 
 const COLUMNS = `
@@ -63,8 +71,11 @@ type Raw = {
   partner_name: string | null;
 };
 
-function asRow(r: Raw): InquiryRow {
+function asRow(r: Raw, coverage: Map<string, number>): InquiryRow {
+  const label = areaLabel(r.area);
   return {
+    areaLabel: label,
+    providersCoveringArea: coverage.get(label.toLowerCase()) ?? 0,
     id: r.id,
     receivedAt: r.received_at,
     name: r.name,
@@ -88,6 +99,24 @@ function asRow(r: Raw): InquiryRow {
 }
 
 /**
+ * How many active providers cover each area, keyed by the lower-cased label.
+ *
+ * Read once per screen rather than per enquiry. The comparison is on the label
+ * because that is what the roster holds — `providers.areas` is free text an operator
+ * wrote — and `areaLabel` is what turns the form's slug into the same shape.
+ */
+async function areaCoverage(): Promise<Map<string, number>> {
+  const { query } = await getDb();
+  const rows = await query<{ area: string; n: string }>(
+    `SELECT lower(a) AS area, count(*)::text AS n
+       FROM providers p, unnest(p.areas) a
+      WHERE p.deleted_at IS NULL AND p.status = 'active'
+      GROUP BY lower(a)`,
+  );
+  return new Map(rows.map((r) => [r.area, Number(r.n)]));
+}
+
+/**
  * Everything waiting, most urgent first and then oldest first.
  *
  * The same ordering Today uses for its own queues, and for the same reason: a discharge
@@ -107,7 +136,8 @@ export async function unhandledInquiries(ctx: AuditContext): Promise<InquiryRow[
                i.received_at`,
   );
   if (rows.length > 0) await auditRead(ctx, 'inquiry');
-  return rows.map(asRow);
+  const coverage = await areaCoverage();
+  return rows.map((r) => asRow(r, coverage));
 }
 
 export async function countUnhandledInquiries(): Promise<number> {
@@ -134,7 +164,8 @@ export async function recentlyHandled(
     [limit],
   );
   if (rows.length > 0) await auditRead(ctx, 'inquiry');
-  return rows.map(asRow);
+  const coverage = await areaCoverage();
+  return rows.map((r) => asRow(r, coverage));
 }
 
 export interface ConvertInput {
