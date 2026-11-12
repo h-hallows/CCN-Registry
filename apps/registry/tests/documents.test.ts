@@ -17,6 +17,7 @@ import {
   redactDocument, setDocumentVisibility,
 } from '@/lib/queries/documents';
 import { makeReferral, markWrittenStatementSent } from '@/lib/domain/referral';
+import { shortlistFor } from '@/lib/queries/match';
 
 let db: DbHandle;
 let providerId: string;
@@ -312,17 +313,39 @@ describe('the download route', () => {
  */
 describe('recording the written statement that went out', () => {
   async function aFreshReferral(): Promise<{ disclosureId: string; caseId: string }> {
-    const [row] = await db.query<{ id: string; household_id: string; dm_name: string }>(
-      `SELECT c.id, c.household_id, h.dm_name
+    /*
+     * A case with somebody referable on it, found by asking rather than by position.
+     *
+     * Both halves of this used to be `ORDER BY ... LIMIT 1` over a random uuid, and
+     * both were wrong in the same way — they picked by position and hoped for a
+     * property. `status = 'active'` is not eligibility: the seed carries Grace Okonkwo
+     * with an expired TB clearance so the blocking bucket has something in it, and she
+     * is active, so whenever her uuid sorted first every test here failed with "TB
+     * clearance expired". And not every companion case has a bench — the one at
+     * `inquiry` has nobody — so filtering to non-ended was not enough either.
+     *
+     * Roughly one fresh run in eight, on both engines, because the seed's uuids are
+     * random per run. `shortlistFor` is the same source the match screen reads, so
+     * what counts as referable here cannot drift from the product.
+     */
+    const candidates = await db.query<{ id: string; dm_name: string }>(
+      `SELECT c.id, h.dm_name
          FROM cases c JOIN households h ON h.id = c.household_id
         WHERE c.deleted_at IS NULL AND c.status <> 'ended' AND c.care = 'companion'
-        ORDER BY c.id LIMIT 1`);
-    const [p] = await db.query<{ id: string }>(
-      `SELECT id FROM providers WHERE status = 'active' AND deleted_at IS NULL
-        ORDER BY id LIMIT 1`);
+        ORDER BY c.id`);
+
+    let row: { id: string; dm_name: string } | undefined;
+    let providerId: string | undefined;
+    for (const candidate of candidates) {
+      const shortlist = await shortlistFor(TEST_CTX, candidate.id);
+      const first = shortlist?.eligible[0];
+      if (first) { row = candidate; providerId = first.providerId; break; }
+    }
+    expect(row, 'the seed has no companion case with anybody referable').toBeTruthy();
+
     const result = await makeReferral(TEST_CTX, {
       caseId: row!.id,
-      providerId: p!.id,
+      providerId: providerId!,
       disclosedTo: row!.dm_name,
       disclosedBy: 'Operator',
       method: 'phone',

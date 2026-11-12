@@ -1,8 +1,10 @@
+import Link from 'next/link';
 import { requireOperator } from '@/lib/operator';
 import { getToday } from '@/lib/queries/today';
+import { countUnhandledInquiries } from '@/lib/queries/intake';
 import { ageWording, dueWording, URGENCY_LABEL } from '@/lib/domain/buckets';
 import {
-  CARE_LABEL, Count, CredentialPill, Empty, RowLink, Section, shortDate,
+  Banner, CARE_LABEL, Count, CredentialPill, Empty, RowLink, Section, shortDate,
 } from '@/components/ui';
 
 export const dynamic = 'force-dynamic';
@@ -10,7 +12,10 @@ export const dynamic = 'force-dynamic';
 export default async function TodayPage() {
   const { ctx } = await requireOperator();
   const now = new Date();
-  const today = await getToday(ctx, now);
+  const [today, unhandledInquiries] = await Promise.all([
+    getToday(ctx, now),
+    countUnhandledInquiries(),
+  ]);
 
   return (
     <>
@@ -32,6 +37,32 @@ export default async function TodayPage() {
           ))}
         </nav>
       </div>
+
+      {/*
+        * Not a § 5 bucket, and deliberately not dressed as one.
+        *
+        * The eight buckets are specified; an unanswered enquiry is earlier than all of
+        * them — it is somebody who has written to us and had no reply, and it is not a
+        * case yet, which is what every bucket below counts. A pointer rather than a
+        * ninth bucket keeps the specified set intact and still puts the most
+        * time-sensitive thing in the business at the top of the screen.
+        */}
+      {unhandledInquiries > 0 ? (
+        <div className="mb-4">
+          <Banner
+            tone="alert"
+            title={unhandledInquiries === 1
+              ? 'One enquiry has had no reply'
+              : `${unhandledInquiries} enquiries have had no reply`}
+          >
+            Nobody has opened these as a case or turned them away.{' '}
+            <Link href="/intake" className="underline underline-offset-4">
+              Open the enquiries
+            </Link>
+            .
+          </Banner>
+        </div>
+      ) : null}
 
       <Section
         id="blocking" title={today.blocking.title} blurb={today.blocking.blurb}

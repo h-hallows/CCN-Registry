@@ -24,6 +24,7 @@ import {
   restorePortalAccess, revokePortalAccess, type PortalSubjectKind,
 } from '@/lib/domain/portalAccess';
 import { addPartner, attachReferralToPartner, PartnerError } from '@/lib/queries/partners';
+import { convertInquiry, IntakeError, turnAwayInquiry } from '@/lib/queries/intake';
 import {
   DocumentError, fileDocument, redactDocument, setDocumentVisibility,
   type DocumentKind, type Subject,
@@ -62,6 +63,7 @@ function messageOf(err: unknown): string {
   if (err instanceof BenchError) return err.message;
   if (err instanceof AccessError) return err.message;
   if (err instanceof PartnerError) return err.message;
+  if (err instanceof IntakeError) return err.message;
   if (err instanceof DocumentError) return err.message;
   if (err instanceof SubmissionError) return err.message;
   if (err instanceof z.ZodError) return err.issues[0]?.message ?? 'Check the form.';
@@ -276,6 +278,81 @@ export async function resolveRequestAction(
  * The issued link comes back in `copy` and goes nowhere else — not to the log, not to the
  * audit diff. Until a mail provider is wired, the operator sends it.
  */
+/**
+ * Turn an enquiry into a household and its first case.
+ *
+ * The one place a household is created. What the operator types is what the registry
+ * believes after speaking to them; the enquiry row is left exactly as the family typed
+ * it, and `inquiries.household_id` joins the two.
+ */
+export async function convertInquiryAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const parsed = z.object({
+      inquiryId: uuid,
+      displayName: z.string().trim().min(2, 'Give the household a name to go by.'),
+      dmName: z.string().trim().min(2, 'Name the person engaging care.'),
+      dmRelationship: z.string().trim().optional(),
+      dmPhone: z.string().trim().optional(),
+      dmEmail: z.string().trim().optional(),
+      crName: z.string().trim().optional(),
+      crArea: z.string().trim().min(2, 'Say which area they are in.'),
+      care: z.enum([
+        'companion', 'personal_care', 'skilled_nursing', 'post_surgical',
+        'overnight_newborn', 'respite', 'hospice_support',
+      ]),
+      urgency: z.enum(['discharge', 'same_day', 'next_day', 'routine']),
+      paymentMethod: z.enum(['private', 'ltc_policy', 'va', 'other']),
+      needsNote: z.string().trim().optional(),
+    }).parse({
+      inquiryId: form.get('inquiryId'),
+      displayName: form.get('displayName'),
+      dmName: form.get('dmName'),
+      dmRelationship: form.get('dmRelationship') || undefined,
+      dmPhone: form.get('dmPhone') || undefined,
+      dmEmail: form.get('dmEmail') || undefined,
+      crName: form.get('crName') || undefined,
+      crArea: form.get('crArea'),
+      care: form.get('care'),
+      urgency: form.get('urgency'),
+      paymentMethod: form.get('paymentMethod'),
+      needsNote: form.get('needsNote') || undefined,
+    });
+
+    const result = await convertInquiry(ctx, parsed);
+    revalidatePath('/intake');
+    revalidatePath('/today');
+    revalidatePath('/cases');
+    return {
+      ok: `Opened as a case. Their record is at /cases/${result.caseId}.`,
+    };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+/**
+ * Close an enquiry with no household behind it. Counted rather than deleted: turn-aways
+ * are part of the baseline the business is measured against.
+ */
+export async function turnAwayInquiryAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const inquiryId = uuid.parse(form.get('inquiryId'));
+    const reason = z.string().trim().min(3, 'Record why.').parse(form.get('reason'));
+    await turnAwayInquiry(ctx, inquiryId, reason);
+    revalidatePath('/intake');
+    revalidatePath('/today');
+    return { ok: 'Recorded, and counted as a turn-away.' };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
 /**
  * Attach a referral that arrived from the public form to the partner who sent it.
  *
