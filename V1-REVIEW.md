@@ -237,3 +237,50 @@ was never exercised on the engine it ships on. It is now.
    deliberate: the alternative was a sign-in link in the function logs.
 7. ~~Decide on document storage.~~ Decided and built — see § 3.1.
 8. Have someone local read the crossed pages before they go live (§ 3.8).
+
+---
+
+## 7. What a table-by-table audit found, 2026-11-12
+
+Every table in the schema, checked against the code that reads or writes it. Five
+tables were written by one half of the product and read by nobody, or read by one half
+and written by nobody — and each one was a loop built at both ends that did not join
+in the middle.
+
+| | |
+|---|---|
+| `inquiries` | Written by the three public intake routes. **Read by nothing.** Today's "needs response" bucket reads `cases`, a step later, so a family who filled in the form arrived in a table no screen displayed. |
+| `households`, `cases`, `providers` | **Written by nothing.** Every household and provider in the system came from the seed; the console could not onboard anybody, and the whole funnel downstream had nowhere to start. |
+| `provider_applications` | Written by `/for-providers`. **Read by nothing.** |
+| `fee_schedules`, `fee_schedule_deliveries` | **Written by nothing**, read by the provider portal — so neither § 1812.527 obligation could be met and `/pro/fee-schedule` was permanently empty. |
+| `consents` | **Written by nothing**, read by `household_shares_outcome_with_partner()` — so no partner could ever see an outcome, and the partner screen promised otherwise in so many words. |
+
+All five are closed: `/intake`, `/applications`, the § 1812.527 section on `/compliance`,
+and consent on the case screen.
+
+Still written and never read, deliberately or not yet:
+
+- `audit_log` — there is no screen. § 3.8 exists so "who looked at this household" is
+  answerable later, and today the answer is "run SQL". **Worth building.**
+- `metric_events` — § 8's funnel is recorded and never displayed.
+- `operator_notifications` — largely superseded by the specific queues (`/intake`,
+  `/requests`, `/submissions`, `/applications`), which are better than one undifferentiated
+  inbox. Worth deciding deliberately rather than leaving.
+- `service_failures`, `case_month_hours` — § 8 again.
+- `advertising_log` — § 1812.533(c). Untouched.
+- `testimonials`, `rate_ranges` — front-door content with no operator screen.
+- `coverage_gaps` — deliberately unread. See DEFERRED.md.
+
+### And the geography did not line up
+
+The public site sells Century City and West Los Angeles; the seeded roster covered the
+San Gabriel Valley, and the two sets did not intersect at a single area. The matcher
+compares a household's area to a provider's by string equality, so every enquiry sent
+through the live form landed on a case with nobody eligible. Fixed in core v0.1.21.
+
+Behind it was a real defect rather than demo data: the public forms submit slugs
+(`santa_monica`), the roster holds what an operator typed (`Santa Monica`), and nothing
+reconciled them. Converting an enquiry would have stored the slug — a household that
+matches nobody, ever, on a case that looks correct on every screen, because an empty
+shortlist is a legitimate answer and nothing distinguished the two. Core v0.1.20 holds
+one vocabulary and both applications derive from it.
