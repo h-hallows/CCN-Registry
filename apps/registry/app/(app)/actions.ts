@@ -26,6 +26,9 @@ import {
 import { addPartner, attachReferralToPartner, PartnerError } from '@/lib/queries/partners';
 import { convertInquiry, IntakeError, turnAwayInquiry } from '@/lib/queries/intake';
 import {
+  ApplicationError, declineApplicant, onboardApplicant,
+} from '@/lib/queries/applications';
+import {
   DocumentError, fileDocument, redactDocument, setDocumentVisibility,
   type DocumentKind, type Subject,
 } from '@/lib/queries/documents';
@@ -64,6 +67,7 @@ function messageOf(err: unknown): string {
   if (err instanceof AccessError) return err.message;
   if (err instanceof PartnerError) return err.message;
   if (err instanceof IntakeError) return err.message;
+  if (err instanceof ApplicationError) return err.message;
   if (err instanceof DocumentError) return err.message;
   if (err instanceof SubmissionError) return err.message;
   if (err instanceof z.ZodError) return err.issues[0]?.message ?? 'Check the form.';
@@ -278,6 +282,76 @@ export async function resolveRequestAction(
  * The issued link comes back in `copy` and goes nowhere else — not to the log, not to the
  * audit diff. Until a mail provider is wired, the operator sends it.
  */
+/**
+ * Put an applicant on the roster.
+ *
+ * They arrive inactive with no credentials, so nothing about this makes them
+ * referable — which is the whole safeguard. What they claimed about their own licence
+ * is a claim until somebody checks it against the body that issued it.
+ */
+export async function onboardApplicantAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const parsed = z.object({
+      applicationId: uuid,
+      fullName: z.string().trim().min(2, 'Give them a name.'),
+      type: z.enum(['RN', 'LVN', 'CNA', 'HCA', 'companion']),
+      phone: z.string().trim().optional(),
+      email: z.string().trim().optional(),
+      licenseNumber: z.string().trim().optional(),
+      transports: z.string().optional(),
+      notes: z.string().trim().optional(),
+    }).parse({
+      applicationId: form.get('applicationId'),
+      fullName: form.get('fullName'),
+      type: form.get('type'),
+      phone: form.get('phone') || undefined,
+      email: form.get('email') || undefined,
+      licenseNumber: form.get('licenseNumber') || undefined,
+      transports: form.get('transports') || undefined,
+      notes: form.get('notes') || undefined,
+    });
+
+    const list = (name: string) => form.getAll(name)
+      .map((v) => String(v).trim()).filter(Boolean);
+
+    const result = await onboardApplicant(ctx, {
+      ...parsed,
+      transports: parsed.transports === 'yes',
+      areas: list('areas'),
+      languages: list('languages'),
+      specialties: list('specialties'),
+    });
+
+    revalidatePath('/applications');
+    revalidatePath('/roster');
+    return {
+      ok: 'On the roster, inactive and with nothing verified. Record their documents '
+        + 'on the roster screen, then make them active.',
+      copy: { label: 'Their record', text: `/roster/${result.providerId}` },
+    };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+export async function declineApplicantAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const applicationId = uuid.parse(form.get('applicationId'));
+    const reason = z.string().trim().min(3, 'Record why.').parse(form.get('reason'));
+    await declineApplicant(ctx, applicationId, reason);
+    revalidatePath('/applications');
+    return { ok: 'Recorded.' };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
 /**
  * Turn an enquiry into a household and its first case.
  *

@@ -5,12 +5,14 @@ import { getToday } from '@/lib/queries/today';
 import { countPendingSubmissions } from '@/lib/queries/submissions';
 import { countPendingRequests } from '@/lib/queries/bench';
 import { countUnhandledInquiries } from '@/lib/queries/intake';
+import { countUnhandledApplications } from '@/lib/queries/applications';
 import { Count } from '@/components/ui';
 
 const NAV = [
   { href: '/today', label: 'Today' },
   { href: '/intake', label: 'Enquiries' },
   { href: '/roster', label: 'Roster' },
+  { href: '/applications', label: 'Applications' },
   { href: '/cases', label: 'Cases' },
   { href: '/match', label: 'Match' },
   { href: '/requests', label: 'Requests' },
@@ -30,13 +32,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
    * that sits unreviewed is a provider who stays off a shortlist they belong on, and a
    * household waiting on an answer is the one queue with a person at the other end.
    */
-  const [today, pendingSubmissions, pendingRequestCount, unhandledInquiryCount] =
-    await Promise.all([
-      getToday(ctx),
-      countPendingSubmissions(),
-      countPendingRequests(),
-      countUnhandledInquiries(),
-    ]);
+  const [
+    today, pendingSubmissions, pendingRequestCount, unhandledInquiryCount,
+    unhandledApplicationCount,
+  ] = await Promise.all([
+    getToday(ctx),
+    countPendingSubmissions(),
+    countPendingRequests(),
+    countUnhandledInquiries(),
+    countUnhandledApplications(),
+  ]);
 
   async function endSession() {
     'use server';
@@ -62,6 +67,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 {item.href === '/submissions' ? <Count n={pendingSubmissions} /> : null}
                 {item.href === '/requests' ? <Count n={pendingRequestCount} /> : null}
                 {item.href === '/intake' ? <Count n={unhandledInquiryCount} /> : null}
+                {item.href === '/applications'
+                  ? <Count n={unhandledApplicationCount} /> : null}
               </Link>
             ))}
           </nav>

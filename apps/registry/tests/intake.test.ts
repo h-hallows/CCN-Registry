@@ -236,13 +236,27 @@ describe('where the household is recorded as being', () => {
       `SELECT a AS area FROM providers p, unnest(p.areas) a
         WHERE p.status = 'active' AND p.deleted_at IS NULL LIMIT 1`);
 
+    /*
+     * An area nothing on the roster lists, found rather than named. This test used to
+     * hardcode `santa_monica` on the grounds that the seeded roster was the San
+     * Gabriel Valley while the public form offered the Westside — a fact about the
+     * demo data, not about the code, and it stopped being true the moment the seed was
+     * made coherent with the front door.
+     */
+    const uncovered = await one<{ area: string }>(
+      `SELECT a AS area FROM (SELECT unnest(ARRAY['Malibu','Bel Air','Holmby Hills',
+                                                  'Nowhere In Particular']) a) candidates
+        WHERE NOT EXISTS (
+          SELECT 1 FROM providers p
+           WHERE p.status = 'active' AND p.deleted_at IS NULL AND a = ANY(p.areas))
+        LIMIT 1`);
+
     const yes = await arrive({ area: covered.area });
-    const no = await arrive({ area: 'santa_monica' });
+    const no = await arrive({ area: uncovered.area });
     const rows = await unhandledInquiries(TEST_CTX);
 
     expect(rows.find((q) => q.id === yes)!.providersCoveringArea).toBeGreaterThan(0);
-    // The seeded roster is the San Gabriel Valley and the public form offers the
-    // Westside, so this is zero — which is the state the banner exists to show.
+    // Zero is the state the banner exists to show: a case nobody can be matched to.
     expect(rows.find((q) => q.id === no)!.providersCoveringArea).toBe(0);
   });
 
