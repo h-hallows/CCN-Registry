@@ -32,6 +32,9 @@ import {
   FeeScheduleError, postFeeSchedule, recordFeeScheduleDelivery,
 } from '@/lib/queries/feeSchedule';
 import {
+  CONSENT_KINDS, ConsentError, recordConsent, revokeConsent,
+} from '@/lib/queries/consent';
+import {
   DocumentError, fileDocument, redactDocument, setDocumentVisibility,
   type DocumentKind, type Subject,
 } from '@/lib/queries/documents';
@@ -72,6 +75,7 @@ function messageOf(err: unknown): string {
   if (err instanceof IntakeError) return err.message;
   if (err instanceof ApplicationError) return err.message;
   if (err instanceof FeeScheduleError) return err.message;
+  if (err instanceof ConsentError) return err.message;
   if (err instanceof DocumentError) return err.message;
   if (err instanceof SubmissionError) return err.message;
   if (err instanceof z.ZodError) return err.issues[0]?.message ?? 'Check the form.';
@@ -286,6 +290,57 @@ export async function resolveRequestAction(
  * The issued link comes back in `copy` and goes nowhere else — not to the log, not to the
  * audit diff. Until a mail provider is wired, the operator sends it.
  */
+/**
+ * Record that a household agreed to something.
+ *
+ * Never inferred — not from them having come through a partner, not as a default on a
+ * form. The row names who in the family gave it, because the question a year later is
+ * who agreed and when.
+ */
+export async function recordConsentAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const parsed = z.object({
+      householdId: uuid,
+      caseId: uuid.optional(),
+      kind: z.enum(CONSENT_KINDS),
+      grantedBy: z.string().trim().min(2, 'Name the person who agreed.'),
+      scopeNote: z.string().trim().optional(),
+    }).parse({
+      householdId: form.get('householdId'),
+      caseId: form.get('caseId') || undefined,
+      kind: form.get('kind'),
+      grantedBy: form.get('grantedBy'),
+      scopeNote: form.get('scopeNote') || undefined,
+    });
+
+    await recordConsent(ctx, parsed);
+    if (parsed.caseId) revalidatePath(`/cases/${parsed.caseId}`);
+    return { ok: 'Recorded.' };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+export async function revokeConsentAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const consentId = uuid.parse(form.get('consentId'));
+    const caseId = form.get('caseId');
+    const reason = z.string().trim().min(3, 'Record what they said.')
+      .parse(form.get('reason'));
+    await revokeConsent(ctx, consentId, reason);
+    if (typeof caseId === 'string' && caseId) revalidatePath(`/cases/${caseId}`);
+    return { ok: 'Withdrawn. Anything that depended on it is no longer published.' };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
 /**
  * Post a fee schedule. § 1812.527.
  *

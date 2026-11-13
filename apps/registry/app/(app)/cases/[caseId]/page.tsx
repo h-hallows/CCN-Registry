@@ -7,6 +7,9 @@ import { getProviderWithStanding } from '@/lib/queries/providers';
 import { benchesFor, feedbackForCase } from '@/lib/queries/bench';
 import { portalUsersFor } from '@/lib/domain/portalAccess';
 import { documentsForCase } from '@/lib/queries/documents';
+import {
+  CONSENT_KINDS, CONSENT_LABEL, CONSENT_MEANS, consentsFor,
+} from '@/lib/queries/consent';
 import { Documents } from '@/components/Documents';
 import { PortalAccess } from '@/components/PortalAccess';
 import { dueWording, URGENCY_LABEL } from '@/lib/domain/buckets';
@@ -14,7 +17,8 @@ import { civilLA, formatISODate } from '@h-hallows/core/domain';
 import { SKILLED_CARE_TYPES } from '@/lib/domain/referral';
 import {
   addNoteAction, endEngagementAction, logCallAction, markWrittenSentAction,
-  recordReferralOutcomeAction, withdrawBenchAction,
+  recordConsentAction, recordReferralOutcomeAction, revokeConsentAction,
+  withdrawBenchAction,
 } from '@/app/(app)/actions';
 import { ActionForm, Disclose } from '@/components/ActionForm';
 import { CopyBox } from '@/components/CopyBox';
@@ -48,10 +52,12 @@ export default async function CasePage({
    * densest in the console — meant the page could not start rendering until the last
    * of six serial round trips came back. Nothing below depends on anything else below.
    */
-  const [benches, feedback, portalUsers, docs, primary, alternates] = await Promise.all([
+  const [benches, feedback, portalUsers, consents, docs, primary, alternates]
+    = await Promise.all([
     benchesFor(ctx, caseId),
     feedbackForCase(ctx, caseId),
     portalUsersFor(ctx, 'household', h.id),
+    consentsFor(ctx, h.id),
     documentsForCase(ctx, caseId, h.id),
     kase.primaryProviderId
       ? getProviderWithStanding(ctx, kase.primaryProviderId, now)
@@ -260,6 +266,115 @@ export default async function CasePage({
               ) : null}
             </tbody>
           </table>
+        </div>
+      </Section>
+
+      {/*
+        * § 3.5. `household_shares_outcome_with_partner()` reads these rows and nothing
+        * wrote one, so the partner portal's outcome column was NULL for every referral
+        * ever sent — and its promise that "where a family has told us we may share how
+        * it went, you will see that here" described something that could not happen.
+        *
+        * Never inferred. Not from the family having come through a partner, not as a
+        * ticked default. The row names who gave it, because the question a year later
+        * is who agreed and when.
+        */}
+      <Section
+        title="What the family has agreed we may share"
+        blurb="Recorded only when somebody said so, by name. Nothing here is assumed, and withdrawing one leaves the record that it existed."
+      >
+        <div className="divide-y hair-soft">
+          {consents.length === 0 ? (
+            <div className="px-4 py-4">
+              <Empty>
+                Nothing agreed. That is the default and a perfectly ordinary state —
+                it means nobody outside the registry learns anything about them.
+              </Empty>
+            </div>
+          ) : (
+            <ul className="divide-y hair-soft">
+              {consents.map((c) => (
+                <li key={c.id} className="px-4 py-3">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="text-sm font-medium">
+                      {CONSENT_LABEL[c.kind] ?? c.kind}
+                    </span>
+                    <span className="text-xs" style={{
+                      color: c.revokedAt ? 'var(--color-expired)' : 'var(--color-ok)',
+                    }}>
+                      {c.revokedAt
+                        ? `withdrawn ${shortDate(c.revokedAt)}`
+                        : `agreed by ${c.grantedBy}, ${shortDate(c.grantedAt)}`}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-xs" style={{ color: 'var(--ink-faint)' }}>
+                    {CONSENT_MEANS[c.kind] ?? ''}
+                    {c.scopeNote ? ` · ${c.scopeNote}` : null}
+                  </p>
+                  {!c.revokedAt ? (
+                    <div className="mt-2">
+                      <Disclose summary="They have changed their mind" tone="quiet">
+                        <ActionForm action={revokeConsentAction} submitLabel="Withdraw it">
+                          <input type="hidden" name="consentId" value={c.id} />
+                          <input type="hidden" name="caseId" value={kase.id} />
+                          <label className="label" htmlFor={`rev-${c.id}`}>
+                            What they said
+                          </label>
+                          <input id={`rev-${c.id}`} name="reason" className="input"
+                            required />
+                          <p className="mt-2 text-[0.6875rem] leading-relaxed"
+                            style={{ color: 'var(--ink-faint)' }}>
+                            The grant stays on the record and gains a withdrawal date.
+                            Anything published under it comes down on its own.
+                          </p>
+                        </ActionForm>
+                      </Disclose>
+                    </div>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="px-4 py-4">
+            <Disclose summary="Record something they have agreed to">
+              <ActionForm action={recordConsentAction} submitLabel="Record it" resetOnSuccess>
+                <input type="hidden" name="householdId" value={h.id} />
+                <input type="hidden" name="caseId" value={kase.id} />
+                <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+                  <div>
+                    <label className="label" htmlFor="consent-kind">What they agreed to</label>
+                    <select id="consent-kind" name="kind" className="select" required
+                      defaultValue="">
+                      <option value="" disabled>Choose one</option>
+                      {CONSENT_KINDS.map((k) => (
+                        <option key={k} value={k}>{CONSENT_LABEL[k]}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label" htmlFor="consent-by">Who agreed</label>
+                    <input id="consent-by" name="grantedBy" className="input" required
+                      defaultValue={h.dmName} />
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <label className="label" htmlFor="consent-note">
+                    Anything they qualified it with
+                  </label>
+                  <input id="consent-note" name="scopeNote" className="input"
+                    placeholder="Optional. Their words." />
+                </div>
+                <p className="mt-3 text-[0.6875rem] leading-relaxed"
+                  style={{ color: 'var(--ink-faint)' }}>
+                  Only record what somebody actually said, on a call you had. Telling
+                  a partner how it went is the one that reaches outside the registry;
+                  it shares that care was arranged and nothing else — not who with, not
+                  what it costs, nothing clinical.
+                </p>
+              </ActionForm>
+            </Disclose>
+          </div>
         </div>
       </Section>
 
