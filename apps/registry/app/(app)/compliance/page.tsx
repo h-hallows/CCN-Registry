@@ -1,7 +1,13 @@
 import Link from 'next/link';
 import { requireOperator } from '@/lib/operator';
 import { getCompliance } from '@/lib/queries/compliance';
-import { LABEL, REVERIFY_AFTER_DAYS } from '@h-hallows/core/domain';
+import {
+  earliestEffectiveFrom, feeScheduleHistory, nurseDeliveries,
+} from '@/lib/queries/feeSchedule';
+import { postFeeScheduleAction, recordFeeDeliveryAction } from '@/app/(app)/actions';
+import { ActionForm, Disclose } from '@/components/ActionForm';
+import { Banner } from '@/components/ui';
+import { civilLA, formatISODate, LABEL, REVERIFY_AFTER_DAYS } from '@h-hallows/core/domain';
 import { dueWording } from '@/lib/domain/buckets';
 import {
   CredentialPill, Empty, RowLink, Section, shortDate, shortDateTime,
@@ -12,7 +18,15 @@ export const dynamic = 'force-dynamic';
 export default async function CompliancePage() {
   const { ctx } = await requireOperator();
   const now = new Date();
-  const c = await getCompliance(ctx, now);
+  const [c, schedules, nurses] = await Promise.all([
+    getCompliance(ctx, now),
+    feeScheduleHistory(ctx),
+    nurseDeliveries(ctx),
+  ]);
+  const inForce = schedules.find((s) => s.inForce) ?? null;
+  const missing = nurses.filter((n) => n.missingCurrent && n.status !== 'do_not_refer');
+  const earliest = earliestEffectiveFrom(now);
+  const todayISO = formatISODate(civilLA(now));
   const late = c.disclosureLog.filter((d) => d.onTime === false).length;
   const outstanding = c.disclosureLog.filter((d) => d.onTime === null).length;
 
@@ -212,6 +226,190 @@ export default async function CompliancePage() {
           {c.rosterStanding.inactive} marked inactive · {c.rosterStanding.doNotRefer} not
           being referred. Neither state ends an engagement a household has already made.
         </p>
+      </Section>
+
+      {/*
+        * § 1812.527. Two obligations, and the second is the one that is auditable per
+        * person: post a schedule, and give it to each nurse BEFORE the interview.
+        * Neither could be met at all until this screen existed — the provider portal
+        * read these tables and nothing wrote them.
+        */}
+      <Section
+        title="Fee schedule — § 1812.527"
+        blurb="A nurses' registry posts its schedule and gives it to each nurse before the interview. A change needs seven days' notice, which the database refuses to store without."
+      >
+        <div className="divide-y hair-soft">
+          <div className="px-4 py-4">
+            {!inForce ? (
+              <Banner tone="alert" title="No fee schedule is in force">
+                Nothing has been posted, so there is nothing to give a nurse and
+                nothing on their own screen. § 1812.527 expects a posted schedule.
+              </Banner>
+            ) : (
+              <>
+                <p className="text-sm">
+                  <strong>Version {inForce.version}</strong> &middot;{' '}
+                  <span className="nums">{inForce.maxFeePct}%</span> maximum, covering
+                  all charges &middot; {inForce.paymentTerms}
+                </p>
+                <p className="mt-0.5 text-xs" style={{ color: 'var(--ink-faint)' }}>
+                  posted {shortDate(inForce.postedOn)} · in force since{' '}
+                  {shortDate(inForce.effectiveFrom)} · recorded as given to{' '}
+                  <span className="nums">{inForce.deliveredTo}</span>
+                </p>
+                <p className="mt-2 whitespace-pre-wrap text-sm"
+                  style={{ color: 'var(--ink-soft)' }}>
+                  {inForce.body}
+                </p>
+              </>
+            )}
+          </div>
+
+          <div className="px-4 py-4">
+            <h3 className="label mb-2">
+              Nurses on the roster — {missing.length} without the current version
+            </h3>
+            {nurses.length === 0 ? (
+              <Empty>No RN or LVN is on the roster, so § 1812.527 has nobody to reach.</Empty>
+            ) : (
+              <div className="scroller">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Nurse</th><th>Type</th><th>Standing</th>
+                      <th>Given</th><th>Before the interview</th><th>Record</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {nurses.map((n) => (
+                      <tr key={n.providerId}>
+                        <td><RowLink href={`/roster/${n.providerId}`}>{n.fullName}</RowLink></td>
+                        <td style={{ color: 'var(--ink-soft)' }}>{n.type}</td>
+                        <td style={{ color: 'var(--ink-soft)' }}>
+                          {n.status.replace(/_/g, ' ')}
+                        </td>
+                        <td style={{
+                          color: n.missingCurrent ? 'var(--color-critical)' : 'var(--ink-soft)',
+                        }}>
+                          {n.deliveredVersion === null
+                            ? 'never'
+                            : `v${n.deliveredVersion}, ${shortDate(n.deliveredOn!)}`}
+                        </td>
+                        <td style={{
+                          color: n.beforeInterview === false
+                            ? 'var(--color-expired)' : 'var(--ink-soft)',
+                        }}>
+                          {n.beforeInterview === null
+                            ? '—' : n.beforeInterview ? 'yes' : 'no'}
+                        </td>
+                        <td>
+                          {inForce && n.missingCurrent ? (
+                            <Disclose summary="Record it" tone="quiet">
+                              <ActionForm
+                                action={recordFeeDeliveryAction}
+                                submitLabel="Record"
+                              >
+                                <input type="hidden" name="providerId" value={n.providerId} />
+                                <input type="hidden" name="scheduleId" value={inForce.id} />
+                                <label className="label" htmlFor={`on-${n.providerId}`}>
+                                  Given on
+                                </label>
+                                <input id={`on-${n.providerId}`} name="deliveredOn"
+                                  type="date" className="input" required
+                                  defaultValue={todayISO} />
+                                <label className="label mt-2" htmlFor={`bi-${n.providerId}`}>
+                                  Before their interview
+                                </label>
+                                <select id={`bi-${n.providerId}`} name="beforeInterview"
+                                  className="select" required defaultValue="yes">
+                                  <option value="yes">Yes</option>
+                                  <option value="no">No — it was afterwards</option>
+                                </select>
+                                <p className="mt-2 text-[0.6875rem] leading-relaxed"
+                                  style={{ color: 'var(--ink-faint)' }}>
+                                  Answer honestly. A record that only ever says yes is
+                                  a record of nothing; the statute asks for before, and
+                                  an after is the evidence of a gap.
+                                </p>
+                              </ActionForm>
+                            </Disclose>
+                          ) : (
+                            <span style={{ color: 'var(--ink-faint)' }}>—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {schedules.length > 1 ? (
+            <div className="px-4 py-3">
+              <Disclose summary={`${schedules.length} versions posted`} tone="quiet">
+                <ul className="space-y-1.5 text-xs" style={{ color: 'var(--ink-faint)' }}>
+                  {schedules.map((s) => (
+                    <li key={s.id}>
+                      v{s.version} · <span className="nums">{s.maxFeePct}%</span> ·{' '}
+                      {s.paymentTerms} · posted {shortDate(s.postedOn)}, effective{' '}
+                      {shortDate(s.effectiveFrom)}
+                      {s.inForce ? ' · in force' : s.upcoming ? ' · upcoming' : ''}
+                      {' · given to '}<span className="nums">{s.deliveredTo}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-[0.6875rem] leading-relaxed">
+                  Prior versions stay. A schedule that quietly replaced its predecessor
+                  would leave nobody able to say what the terms were when they signed.
+                </p>
+              </Disclose>
+            </div>
+          ) : null}
+
+          <div className="px-4 py-4">
+            <Disclose summary="Post a new version">
+              <ActionForm
+                action={postFeeScheduleAction}
+                submitLabel="Post it"
+                confirm="A posted schedule cannot be edited or withdrawn, only superseded. Continue?"
+              >
+                <div className="grid gap-x-4 gap-y-3 sm:grid-cols-3">
+                  <div>
+                    <label className="label" htmlFor="maxFeePct">
+                      Maximum fee, all charges
+                    </label>
+                    <input id="maxFeePct" name="maxFeePct" type="number" step="0.01"
+                      min="0.01" max="100" className="input" required
+                      defaultValue={inForce?.maxFeePct ?? ''} />
+                  </div>
+                  <div>
+                    <label className="label" htmlFor="paymentTerms">Payment terms</label>
+                    <input id="paymentTerms" name="paymentTerms" className="input" required
+                      defaultValue={inForce?.paymentTerms ?? ''} placeholder="Net 15" />
+                  </div>
+                  <div>
+                    <label className="label" htmlFor="effectiveFrom">Takes effect</label>
+                    <input id="effectiveFrom" name="effectiveFrom" type="date"
+                      className="input" required min={earliest} defaultValue={earliest} />
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <label className="label" htmlFor="body">The schedule itself</label>
+                  <textarea id="body" name="body" className="textarea" rows={5} required
+                    defaultValue={inForce?.body ?? ''} />
+                </div>
+                <p className="mt-3 text-[0.6875rem] leading-relaxed"
+                  style={{ color: 'var(--ink-faint)' }}>
+                  The earliest date offered is {earliest}, seven days out. § 1812.527
+                  requires that notice and the database refuses a shorter one, so a
+                  schedule that would take effect sooner cannot be stored at all.
+                  Posting supersedes the current version rather than replacing it.
+                </p>
+              </ActionForm>
+            </Disclose>
+          </div>
+        </div>
       </Section>
     </>
   );

@@ -29,6 +29,9 @@ import {
   ApplicationError, declineApplicant, onboardApplicant,
 } from '@/lib/queries/applications';
 import {
+  FeeScheduleError, postFeeSchedule, recordFeeScheduleDelivery,
+} from '@/lib/queries/feeSchedule';
+import {
   DocumentError, fileDocument, redactDocument, setDocumentVisibility,
   type DocumentKind, type Subject,
 } from '@/lib/queries/documents';
@@ -68,6 +71,7 @@ function messageOf(err: unknown): string {
   if (err instanceof PartnerError) return err.message;
   if (err instanceof IntakeError) return err.message;
   if (err instanceof ApplicationError) return err.message;
+  if (err instanceof FeeScheduleError) return err.message;
   if (err instanceof DocumentError) return err.message;
   if (err instanceof SubmissionError) return err.message;
   if (err instanceof z.ZodError) return err.issues[0]?.message ?? 'Check the form.';
@@ -282,6 +286,83 @@ export async function resolveRequestAction(
  * The issued link comes back in `copy` and goes nowhere else — not to the log, not to the
  * audit diff. Until a mail provider is wired, the operator sends it.
  */
+/**
+ * Post a fee schedule. § 1812.527.
+ *
+ * Never an edit. A schedule is posted and superseded, because the embargo exists so
+ * terms cannot change under somebody mid-engagement and an editable row would make
+ * the posted date a claim rather than a record.
+ */
+export async function postFeeScheduleAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const parsed = z.object({
+      maxFeePct: z.coerce.number(),
+      paymentTerms: z.string().trim().min(3, 'Say what the payment terms are.'),
+      body: z.string().trim().min(20, 'The schedule cannot be a sentence fragment.'),
+      effectiveFrom: isoDate,
+    }).parse({
+      maxFeePct: form.get('maxFeePct'),
+      paymentTerms: form.get('paymentTerms'),
+      body: form.get('body'),
+      effectiveFrom: form.get('effectiveFrom'),
+    });
+
+    const result = await postFeeSchedule(ctx, parsed);
+    revalidatePath('/compliance');
+    revalidatePath('/roster');
+    return {
+      ok: `Posted as version ${result.version}. Give it to every nurse on the roster `
+        + 'and record that you did — the statute is about what they were given.',
+    };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+/**
+ * Record that a nurse was given it.
+ *
+ * "Before the interview" is asked rather than assumed: a delivery recorded as after is
+ * the evidence of a gap, and a form that only accepts the compliant answer produces a
+ * clean record of something that did not happen.
+ */
+export async function recordFeeDeliveryAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const parsed = z.object({
+      providerId: uuid,
+      scheduleId: uuid,
+      deliveredOn: isoDate,
+      beforeInterview: z.enum(['yes', 'no']),
+    }).parse({
+      providerId: form.get('providerId'),
+      scheduleId: form.get('scheduleId'),
+      deliveredOn: form.get('deliveredOn'),
+      beforeInterview: form.get('beforeInterview'),
+    });
+
+    await recordFeeScheduleDelivery(ctx, {
+      ...parsed,
+      beforeInterview: parsed.beforeInterview === 'yes',
+    });
+    revalidatePath('/compliance');
+    revalidatePath(`/roster/${parsed.providerId}`);
+    return {
+      ok: parsed.beforeInterview === 'yes'
+        ? 'Recorded, before the interview.'
+        : 'Recorded — and noted as after the interview, which § 1812.527 asks you to '
+          + 'do before.',
+    };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
 /**
  * Put an applicant on the roster.
  *
