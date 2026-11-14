@@ -19,6 +19,7 @@ const NAV = [
   { href: '/submissions', label: 'Submissions' },
   { href: '/partners', label: 'Partners' },
   { href: '/compliance', label: 'Compliance' },
+  { href: '/measure', label: 'Measure' },
   { href: '/audit', label: 'Audit' },
 ];
 

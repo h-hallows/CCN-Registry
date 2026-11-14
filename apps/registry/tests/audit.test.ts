@@ -314,3 +314,60 @@ describe('collapsing repeated reads', () => {
     expect(out.reduce((n, r) => n + r.times, 0)).toBe(rows.length);
   });
 });
+
+describe('the verb matches what happened', () => {
+  /*
+   * "created case" for a logged phone call reads as a case being opened. The entity
+   * names the subject; the action has to be true of THAT subject, not of whatever
+   * sub-record was inserted beside it.
+   */
+  it('records a write on a case as an update, not a creation', async () => {
+    const kase = await one<{ id: string }>(
+      `SELECT id FROM cases WHERE deleted_at IS NULL ORDER BY created_at LIMIT 1`,
+    );
+    const { logCall } = await import('@/lib/queries/cases');
+    const { recordMonthHours } = await import('@/lib/metrics');
+
+    await logCall({ ...WATCHER, actor: 'verb@example.com' }, kase.id, 'Spoke to the family.');
+    await recordMonthHours({ ...WATCHER, actor: 'verb@example.com' }, kase.id, '2026-04-01', 40);
+
+    const rows = await db.query<{ action: string }>(
+      `SELECT action FROM audit_log
+        WHERE actor = 'verb@example.com' AND entity = 'case' AND action <> 'read'`,
+    );
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    expect(rows.every((r) => r.action === 'update'), 'a sub-record write said "create"')
+      .toBe(true);
+  });
+
+  it('still records creating a household as a creation', async () => {
+    /*
+     * This is what stops the fix above over-reaching into "nothing is ever created".
+     * convertInquiry is the only thing that brings a household into existence, and it
+     * has to keep saying so.
+     */
+    const { convertInquiry } = await import('@/lib/queries/intake');
+    const [inquiry] = await db.query<{ id: string }>(
+      `INSERT INTO inquiries (name, phone, care_type, area, urgency, payment_method, source_path)
+       VALUES ('Verb Test', '(310) 555-0000', 'companion', 'Westwood', 'routine',
+               'private', '/')
+       RETURNING id`,
+    );
+
+    await convertInquiry({ ...WATCHER, actor: 'creator@example.com' }, {
+      inquiryId: inquiry!.id,
+      displayName: 'Verb — Westwood',
+      dmName: 'Verb Test',
+      crArea: 'Westwood',
+      care: 'companion',
+      urgency: 'routine',
+      paymentMethod: 'private',
+    });
+
+    const rows = await db.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM audit_log
+        WHERE entity = 'household' AND action = 'create' AND actor = 'creator@example.com'`,
+    );
+    expect(Number(rows[0]!.n)).toBeGreaterThan(0);
+  });
+});

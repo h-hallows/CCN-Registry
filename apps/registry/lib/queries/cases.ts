@@ -304,8 +304,13 @@ export async function logCall(
       await emit('first_contact', { caseId }, {}, tx);
     }
   });
+  /*
+   * `update`, not `create`. What was created is a timeline entry; what the audit row
+   * names is the CASE, and a log that says "created case" for a logged phone call reads
+   * as a case being opened. Only convertInquiry creates a case.
+   */
   await audit({
-    ...ctx, action: 'create', entity: 'case', entityId: caseId,
+    ...ctx, action: 'update', entity: 'case', entityId: caseId,
     diff: { wrote: 'timeline entry', type: 'call' },
   });
 }
@@ -317,7 +322,7 @@ export async function addNote(ctx: AuditContext, caseId: string, body: string): 
     insertTimeline(tx, { caseId, type: 'note', author: ctx.actor, body }),
   );
   await audit({
-    ...ctx, action: 'create', entity: 'case', entityId: caseId,
+    ...ctx, action: 'update', entity: 'case', entityId: caseId,
     diff: { wrote: 'timeline entry', type: 'note' },
   });
 }

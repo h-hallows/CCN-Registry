@@ -191,6 +191,21 @@ export function formatBlocks(blocks: string[]): string {
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /**
+ * A month, from either 'YYYY-MM' or a first-of-month date.
+ *
+ * It exists because the case screen was formatting `2026-11-01` by calling shortDate and
+ * stripping a leading "1 " with a regex — which worked, and would have gone on working
+ * right up until it was handed a date that was not the first of the month.
+ */
+export function monthLabel(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const m = /^(\d{4})-(\d{2})/.exec(iso);
+  if (!m) return '—';
+  const name = MONTHS[Number(m[2]) - 1];
+  return name ? `${name} ${m[1]}` : '—';
+}
+
+/**
  * Format a plain 'YYYY-MM-DD'. Anything else returns an em dash rather than a mangled
  * date: a wrong-looking date on a compliance screen is worse than a visible blank.
  */

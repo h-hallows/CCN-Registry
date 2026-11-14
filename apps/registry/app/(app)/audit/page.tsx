@@ -83,11 +83,11 @@ function Head() {
   return (
     <thead>
       <tr className="text-left">
-        <th className="px-4 py-2 label">When</th>
-        <th className="px-4 py-2 label">Who</th>
-        <th className="px-4 py-2 label">Did what</th>
-        <th className="px-4 py-2 label">Detail</th>
-        <th className="px-4 py-2 label">From</th>
+        <th className="px-4 py-2">When</th>
+        <th className="px-4 py-2">Who</th>
+        <th className="px-4 py-2">Did what</th>
+        <th className="px-4 py-2">Detail</th>
+        <th className="px-4 py-2">From</th>
       </tr>
     </thead>
   );
@@ -281,10 +281,10 @@ export default async function AuditPage({
               <table className="w-full">
                 <thead>
                   <tr className="text-left">
-                    <th className="px-4 py-2 label">When</th>
-                    <th className="px-4 py-2 label">Did what</th>
-                    <th className="px-4 py-2 label">Detail</th>
-                    <th className="px-4 py-2 label">From</th>
+                    <th className="px-4 py-2">When</th>
+                    <th className="px-4 py-2">Did what</th>
+                    <th className="px-4 py-2">Detail</th>
+                    <th className="px-4 py-2">From</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -308,11 +308,11 @@ export default async function AuditPage({
               <table className="w-full">
                 <thead>
                   <tr className="text-left">
-                    <th className="px-4 py-2 label">When</th>
-                    <th className="px-4 py-2 label">Who</th>
-                    <th className="px-4 py-2 label">Did what</th>
-                    <th className="px-4 py-2 label">Detail</th>
-                    <th className="px-4 py-2 label">From</th>
+                    <th className="px-4 py-2">When</th>
+                    <th className="px-4 py-2">Who</th>
+                    <th className="px-4 py-2">Did what</th>
+                    <th className="px-4 py-2">Detail</th>
+                    <th className="px-4 py-2">From</th>
                   </tr>
                 </thead>
                 <tbody>{writes.map((e) => <FlatRow key={e.id} entry={e} />)}</tbody>
@@ -333,11 +333,11 @@ export default async function AuditPage({
             <table className="w-full">
               <thead>
                 <tr className="text-left">
-                  <th className="px-4 py-2 label">Who</th>
-                  <th className="px-4 py-2 label">Reads</th>
-                  <th className="px-4 py-2 label">Writes</th>
-                  <th className="px-4 py-2 label">First seen</th>
-                  <th className="px-4 py-2 label">Last seen</th>
+                  <th className="px-4 py-2">Who</th>
+                  <th className="px-4 py-2">Reads</th>
+                  <th className="px-4 py-2">Writes</th>
+                  <th className="px-4 py-2">First seen</th>
+                  <th className="px-4 py-2">Last seen</th>
                 </tr>
               </thead>
               <tbody>

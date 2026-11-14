@@ -17,14 +17,16 @@ import { civilLA, formatISODate } from '@h-hallows/core/domain';
 import { SKILLED_CARE_TYPES } from '@/lib/domain/referral';
 import {
   addNoteAction, endEngagementAction, logCallAction, markWrittenSentAction,
-  recordConsentAction, recordReferralOutcomeAction, revokeConsentAction,
-  withdrawBenchAction,
+  recordConsentAction, recordMonthHoursAction, recordReferralOutcomeAction,
+  recordServiceFailureAction, revokeConsentAction, withdrawBenchAction,
 } from '@/app/(app)/actions';
+import { measureForCase } from '@/lib/queries/measure';
+import { currentMonthISO, SERVICE_FAILURE_KINDS, SERVICE_FAILURE_LABEL } from '@/lib/metrics';
 import { ActionForm, Disclose } from '@/components/ActionForm';
 import { CopyBox } from '@/components/CopyBox';
 import {
-  Banner, CARE_LABEL, Eligibility, Empty, END_REASON_LABEL, Field, formatBlocks, Rate,
-  RowLink, Section, shortDate, shortDateTime, STATUS_LABEL,
+  Banner, CARE_LABEL, Eligibility, Empty, END_REASON_LABEL, Field, formatBlocks,
+  monthLabel, Rate, RowLink, Section, shortDate, shortDateTime, STATUS_LABEL,
 } from '@/components/ui';
 
 export const dynamic = 'force-dynamic';
@@ -43,6 +45,8 @@ export default async function CasePage({
   const { kase, timeline, referrals } = found;
   const h = kase.household;
   const todayISO = formatISODate(civilLA(now));
+  // The month in California, which is where every one of these hours was worked.
+  const thisMonth = currentMonthISO(now).slice(0, 7);
 
   const isSkilled = (SKILLED_CARE_TYPES as readonly string[]).includes(kase.care);
   const physicianMissing = isSkilled && !h.physicianName?.trim();
@@ -52,13 +56,14 @@ export default async function CasePage({
    * densest in the console — meant the page could not start rendering until the last
    * of six serial round trips came back. Nothing below depends on anything else below.
    */
-  const [benches, feedback, portalUsers, consents, docs, primary, alternates]
+  const [benches, feedback, portalUsers, consents, docs, measure, primary, alternates]
     = await Promise.all([
     benchesFor(ctx, caseId),
     feedbackForCase(ctx, caseId),
     portalUsersFor(ctx, 'household', h.id),
     consentsFor(ctx, h.id),
     documentsForCase(ctx, caseId, h.id),
+    measureForCase(ctx, caseId),
     kase.primaryProviderId
       ? getProviderWithStanding(ctx, kase.primaryProviderId, now)
       : Promise.resolve(null),
@@ -712,6 +717,123 @@ export default async function CasePage({
               There is no action to take here and none is offered. I7 and § 687.2(e): this
               must never reach a provider, their record or their standing on the roster.
             </p>
+          </div>
+        )}
+      </Section>
+
+      <Section
+        id="measure"
+        title="Hours and service failures"
+        blurb="§ 8. These two series are what say whether the registry is working: how much can be held at once, and whether a household is quietly going elsewhere."
+        right={
+          <Link href="/measure" className="text-xs underline underline-offset-4"
+            style={{ color: 'var(--ink-faint)' }}>
+            All of it
+          </Link>
+        }
+      >
+        <div className="grid gap-4 border-b hair px-4 py-4 lg:grid-cols-2">
+          <ActionForm
+            action={recordMonthHoursAction}
+            submitLabel="Record hours"
+            primary
+            resetOnSuccess
+          >
+            <input type="hidden" name="caseId" value={kase.id} />
+            <span className="label">A month&rsquo;s billed hours</span>
+            <div className="mt-1 flex flex-wrap items-end gap-3">
+              <div>
+                <label className="label" htmlFor="hours-month">Month</label>
+                <input id="hours-month" name="month" type="month" className="input"
+                  required defaultValue={thisMonth} max={thisMonth} />
+              </div>
+              <div>
+                <label className="label" htmlFor="hours-value">Hours</label>
+                <input id="hours-value" name="hours" type="number" className="input"
+                  required min={0} max={744} step="0.1" placeholder="86.6" />
+              </div>
+            </div>
+            <p className="mt-2 text-[0.6875rem] leading-relaxed"
+              style={{ color: 'var(--ink-faint)' }}>
+              The figure the invoices produce, not an estimate. Recording a month again
+              overwrites it, and the audit log keeps what it was.
+            </p>
+          </ActionForm>
+
+          <Disclose summary="Record a service failure" tone="quiet">
+            <ActionForm action={recordServiceFailureAction} submitLabel="Record it" resetOnSuccess>
+              <input type="hidden" name="caseId" value={kase.id} />
+              <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+                <div>
+                  <label className="label" htmlFor="sf-kind">What happened</label>
+                  <select id="sf-kind" name="kind" className="select" required>
+                    {SERVICE_FAILURE_KINDS.map((k) => (
+                      <option key={k} value={k}>{SERVICE_FAILURE_LABEL[k]}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="label" htmlFor="sf-date">The day it happened</label>
+                  <input id="sf-date" name="onDate" type="date" className="input" required
+                    max={todayISO} />
+                </div>
+              </div>
+              <div className="mt-3">
+                <label className="label" htmlFor="sf-note">In your own words</label>
+                <textarea id="sf-note" name="note" className="textarea" rows={2} required
+                  placeholder="What the household experienced, and what was done about it." />
+              </div>
+              <p className="mt-2 text-[0.6875rem] leading-relaxed"
+                style={{ color: 'var(--ink-faint)' }}>
+                I7: this starts nothing. It reaches no provider&rsquo;s record and changes
+                nobody&rsquo;s standing on the roster. It is a measurement, and a
+                measurement that triggers a process stops being recorded honestly.
+              </p>
+            </ActionForm>
+          </Disclose>
+        </div>
+
+        {measure.hours.length === 0 && measure.failures.length === 0 ? (
+          <Empty>Nothing recorded for this case yet.</Empty>
+        ) : (
+          <div className="grid gap-x-6 gap-y-4 px-4 py-4 sm:grid-cols-2">
+            <div>
+              <span className="label">Hours by month</span>
+              {measure.hours.length === 0 ? (
+                <p className="text-sm" style={{ color: 'var(--ink-faint)' }}>None recorded.</p>
+              ) : (
+                <ul className="mt-1 space-y-0.5">
+                  {measure.hours.map((h) => (
+                    <li key={h.month} className="nums text-sm">
+                      {monthLabel(h.month)} — {h.hours}
+                      <span className="ml-1.5 text-[0.6875rem]" style={{ color: 'var(--ink-faint)' }}>
+                        recorded {shortDateTime(h.recordedAt)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div>
+              <span className="label">Service failures</span>
+              {measure.failures.length === 0 ? (
+                <p className="text-sm" style={{ color: 'var(--ink-faint)' }}>None recorded.</p>
+              ) : (
+                <ul className="mt-1 space-y-1.5">
+                  {measure.failures.map((f) => (
+                    <li key={f.id} className="text-sm">
+                      <span className="nums">{shortDate(f.onDate)}</span>
+                      {' — '}{SERVICE_FAILURE_LABEL[f.kind]}
+                      {f.note ? (
+                        <span className="block text-xs" style={{ color: 'var(--ink-soft)' }}>
+                          {f.note}
+                        </span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
         )}
       </Section>

@@ -14,7 +14,9 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { mailConfigured, sendMail } from '@h-hallows/core/mail';
 import { requireOperator } from '@/lib/operator';
+import { monthLabel } from '@/components/ui';
 import { addNote, logCall } from '@/lib/queries/cases';
+import { MeasureError, recordMonthHours, recordServiceFailure } from '@/lib/metrics';
 import { saveShortlistToTimeline } from '@/lib/queries/match';
 import {
   BenchError, publishBench, resolveRequest, withdrawBench,
@@ -78,6 +80,7 @@ function messageOf(err: unknown): string {
   if (err instanceof ConsentError) return err.message;
   if (err instanceof DocumentError) return err.message;
   if (err instanceof SubmissionError) return err.message;
+  if (err instanceof MeasureError) return err.message;
   if (err instanceof z.ZodError) return err.issues[0]?.message ?? 'Check the form.';
   if (err instanceof Error) return err.message;
   return 'Something went wrong.';
@@ -1124,6 +1127,79 @@ export async function rejectSubmissionAction(
     revalidatePath('/submissions');
     revalidatePath(`/roster/${result.providerId}`);
     return { ok: 'Rejected. No credential was recorded.' };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+/**
+ * § 8: record a day the household did not get the care they were expecting.
+ *
+ * This is the denominator of the capacity measure — whether the operator holds twelve
+ * concurrent cases where she held six WITHOUT one of these. It is also the record of a
+ * bad day for a particular family, which is why it is audited against them.
+ *
+ * I7: recording one routes nothing. No corrective workflow, no provider standing
+ * changes, nothing reaches anybody's record. It is a measurement, and a measurement that
+ * triggers a process stops being recorded honestly.
+ */
+export async function recordServiceFailureAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const parsed = z.object({
+      caseId: uuid,
+      kind: z.enum([
+        'missed_shift', 'unanswered_discharge_call',
+        'lapsed_credential_reached_household', 'no_eligible_provider_available', 'other',
+      ]),
+      onDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Give the date it happened.'),
+      note: z.string().trim().min(3, 'Say what happened, in your own words.'),
+    }).parse({
+      caseId: form.get('caseId'),
+      kind: form.get('kind'),
+      onDate: form.get('onDate'),
+      note: form.get('note'),
+    });
+
+    await recordServiceFailure(ctx, parsed.caseId, parsed.kind, parsed.onDate, parsed.note);
+
+    revalidatePath(`/cases/${parsed.caseId}`);
+    revalidatePath('/measure');
+    return { ok: 'Recorded. It reaches no provider’s record and starts nothing.' };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+/**
+ * § 8: a month's billed hours for one case.
+ *
+ * The leakage leading indicator. Corrections overwrite, because the figure changes when
+ * the invoices land — the audit row carries the previous value so a correction reads as
+ * a correction rather than as the only number there ever was.
+ */
+export async function recordMonthHoursAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const parsed = z.object({
+      caseId: uuid,
+      month: z.string().regex(/^\d{4}-\d{2}$/, 'Pick a month.'),
+      hours: z.coerce.number().min(0, 'Hours cannot be negative.'),
+    }).parse({
+      caseId: form.get('caseId'),
+      month: form.get('month'),
+      hours: form.get('hours'),
+    });
+
+    await recordMonthHours(ctx, parsed.caseId, `${parsed.month}-01`, parsed.hours);
+
+    revalidatePath(`/cases/${parsed.caseId}`);
+    revalidatePath('/measure');
+    return { ok: `Recorded ${parsed.hours} hours for ${monthLabel(`${parsed.month}-01`)}.` };
   } catch (err) {
     return fail(messageOf(err));
   }

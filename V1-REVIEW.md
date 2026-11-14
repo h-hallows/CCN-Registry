@@ -258,6 +258,42 @@ in the middle.
 All five are closed: `/intake`, `/applications`, the § 1812.527 section on `/compliance`,
 and consent on the case screen.
 
+### 7.0 § 8 — recorded, unreadable, and partly unrecordable
+
+`metric_events` has been emitted from eight places since the first commit and read by
+nothing. Worse: `recordServiceFailure` and `recordMonthHours`, which `lib/metrics.ts`
+names in its own header as the two series that decide whether the platform is worth
+funding, had **no caller anywhere**. The seed wrote them so the tables would not look
+empty. The running system never could, and every test passed, because there was nothing
+to test.
+
+Closed:
+
+- `/measure` reads all three questions back. The funnel (where the work stops), the
+  sources (whether the constraint is demand or capacity), capacity as concurrent cases
+  held without a service failure, and leakage as billed hours per case per month.
+- Both record functions now take an audit context and write inside the transaction that
+  writes the measurement. A row naming the day a household did not get the care they
+  expected is identifiable information about them; it was being written with no actor.
+- `service_failure` is an audited entity in the household span (core 0022), so a missed
+  shift turns up when someone asks what happened to this family.
+- A test asserts every exported function in `lib/metrics.ts` has a caller outside the
+  module. It found a third dead export immediately. Dead measurement code is
+  indistinguishable from a measurement nobody takes.
+
+Three defects the screen surfaced about itself, all fixed:
+
+- The funnel's later steps exceeded its earlier ones, because `shortlist_generated`
+  fires when the operator opens the match screen — an action she can skip. Conversion is
+  therefore measured against enquiries arriving, never against the row above, and the
+  count that skipped each step is a column of its own.
+- "Held now" counted `status = 'active'` while every past month counted
+  referred-and-not-ended, so the current month disagreed with the figure printed a
+  hand's width above it. Held is now defined once, in one place, and stated on screen.
+- Every leakage sparkline shared one vertical scale, so the tapering engagement — the
+  one row the section exists for — rendered as six flat bars in the bottom quarter of
+  the box.
+
 ### 7.1 `audit_log` — written from day one, and unreadable
 
 This one was not a missing screen. `audit_log` has been written faithfully since 0001,
@@ -302,11 +338,9 @@ Closed:
 
 Still written and never read, deliberately or not yet:
 
-- `metric_events` — § 8's funnel is recorded and never displayed.
 - `operator_notifications` — largely superseded by the specific queues (`/intake`,
   `/requests`, `/submissions`, `/applications`), which are better than one undifferentiated
   inbox. Worth deciding deliberately rather than leaving.
-- `service_failures`, `case_month_hours` — § 8 again.
 - `advertising_log` — § 1812.533(c). Untouched.
 - `testimonials`, `rate_ranges` — front-door content with no operator screen.
 - `coverage_gaps` — deliberately unread. See DEFERRED.md.
