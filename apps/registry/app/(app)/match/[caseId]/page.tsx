@@ -5,6 +5,7 @@ import { getCase } from '@/lib/queries/cases';
 import { shortlistFor } from '@/lib/queries/match';
 import { benchesFor } from '@/lib/queries/bench';
 import { SKILLED_CARE_TYPES } from '@/lib/domain/referral';
+import { assignmentBlockersFor, ASSIGNMENT_FIELDS } from '@/lib/queries/register';
 import { PERMITTED } from '@h-hallows/core/domain';
 import {
   makeReferralAction, publishBenchAction, saveShortlistAction, withdrawBenchAction,
@@ -25,10 +26,18 @@ export default async function MatchCasePage({
 
   // The screen and the bench do not depend on each other, and neither depends on the
   // case read beyond it existing — so all three go out together.
-  const [found, shortlist, benches] = await Promise.all([
+  const [found, shortlist, benches, missingForLog] = await Promise.all([
     getCase(ctx, caseId),
     shortlistFor(ctx, caseId, now),
     benchesFor(ctx, caseId),
+    /*
+     * § 1812.529's log sheet is written in the referral transaction and the database
+     * refuses the referral without it, so a missing patient address is a missing
+     * referral. The operator finds that out HERE. The alternative is finding out after
+     * giving the spoken disclosure out loud to a person, and § 1812.5095(f) asks for the
+     * record of that act, not a second attempt at it.
+     */
+    assignmentBlockersFor(caseId),
   ]);
   if (!found || !shortlist) notFound();
   const { kase } = found;
@@ -57,10 +66,37 @@ export default async function MatchCasePage({
         <Link href={`/cases/${kase.id}`} className="btn">Open the case</Link>
       </div>
 
-      {physicianMissing ? (
-        <Banner tone="alert" title="No ordering physician on the household record">
-          A referral on this skilled case will be refused until an ordering physician is
-          recorded — by the application and by the database.
+      {missingForLog.length > 0 ? (
+        <Banner
+          tone="alert"
+          title={`A referral on this case will be refused: ${missingForLog.length === 1
+            ? '1 statutory field is missing' : `${missingForLog.length} statutory fields are missing`}`}
+        >
+          <p>
+            Private duty nursing is Civil Code Chapter 7, and § 1812.529 asks for a
+            permanent log sheet for every assignment. It is written in the same
+            transaction as the referral, so the database refuses a referral it cannot
+            write. These come from the household and the case:
+          </p>
+          <ul className="mt-2 space-y-1">
+            {missingForLog.map((f) => {
+              const def: { label: string; fix?: string } = ASSIGNMENT_FIELDS[f];
+              return (
+                <li key={f}>
+                  <strong>{def.label.replace(/^The /, '')}</strong>
+                  {def.fix ? ` — ${def.fix}` : null}
+                </li>
+              );
+            })}
+          </ul>
+          <p className="mt-2">
+            <Link href={`/cases/${caseId}`} className="underline">Open the case</Link>
+            {' to fill them in. '}
+            {physicianMissing
+              ? 'The physician is required twice over: § 1812.524 and I11 refuse a '
+                + 'skilled referral without one, whatever the log sheet needs.'
+              : ''}
+          </p>
         </Banner>
       ) : null}
 
@@ -304,7 +340,14 @@ export default async function MatchCasePage({
         title="Record a referral"
         blurb="A referral is recorded only together with the spoken disclosure it was made under. There is no skip path and no option to record it later."
       >
-        {shortlist.eligible.length === 0 ? (
+        {missingForLog.length > 0 ? (
+          <Empty>
+            Not until the record is complete. A referral writes its § 1812.529 log sheet
+            in the same transaction, and this one cannot be written yet — so the form is
+            not here to be filled in and refused after the disclosure has been given.
+            The banner above says what is missing.
+          </Empty>
+        ) : shortlist.eligible.length === 0 ? (
           <Empty>Nothing eligible to refer.</Empty>
         ) : (
           <div className="px-4 py-4">

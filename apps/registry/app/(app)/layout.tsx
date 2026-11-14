@@ -20,6 +20,7 @@ const NAV = [
   { href: '/partners', label: 'Partners' },
   { href: '/compliance', label: 'Compliance' },
   { href: '/measure', label: 'Measure' },
+  { href: '/register', label: 'Register' },
   { href: '/audit', label: 'Audit' },
 ];
 

@@ -336,6 +336,45 @@ Closed:
   household's trail is recorded as a read of that household, so the audit screen is not
   the one place in the console you can look from without leaving a mark.
 
+### 7.2 `assignment_log` — present, empty, and reading as compliance
+
+Civil Code § 1812.529 asks a nurses' registry for permanent log sheets of every order
+for nursing service and every assignment made from it — the patient and their address,
+the attending physician, the nurse referred, the hour the order arrived, the dates of
+service, the fee charged — and forbids false entries in them.
+
+The table was created in core migration 0004 and **nothing ever inserted into it.** That
+is the worst of the three states a statutory register can be in. An absent table is an
+open gap. A written one is evidence. A present and empty one reads as compliance to
+anyone who looks at the schema, while the shelf it stands for holds nothing — and it had
+tests: it refused UPDATE, refused DELETE, demanded a note on a correction. All of them
+passed against rows the test had inserted itself, which is why none of them noticed that
+the application never did.
+
+Closed in core v0.1.24–v0.1.27 and `/register`:
+
+- The log sheet is part of what a referral IS. `makeReferral` writes it in the
+  transaction that writes the referral, from one statement in core that the seed uses
+  too, and `trg_assignment_logged` — a deferred constraint trigger — checks at COMMIT
+  that it did. A Chapter 7 referral that reaches the database without its entry is
+  rolled back, whether it came from the app, a script or psql.
+- That makes four of the statutory fields into **referral preconditions**: the patient's
+  name, the address care is given at, the date care begins, and the fee. Three were
+  nullable and unchecked, so a nursing referral recorded without them was never lawful —
+  it only looked complete. The match screen computes the blockers from the same list the
+  transaction refuses on, and hides the referral form, because the operator gives the
+  spoken disclosure out loud BEFORE recording it and a refusal that arrives afterwards
+  leaves the act with nothing to show for it.
+- `trg_assignment_aligned` refuses a sheet whose case or provider disagrees with the
+  referral it points at. An append-only record of an assignment that did not happen as
+  written is the false entry the section prohibits by name.
+- Nothing invents a value. `feeBasisOf` returns null rather than falling back to the fee
+  schedule's maximum: a maximum is what the registry may charge, not what it did.
+- The three referrals made before the trigger existed are **not back-filled**. They show
+  on `/register` as gaps, with the one honest remedy — file the entry now, from the
+  household record, dated today — and the register states how many days after the
+  assignment each entry was made.
+
 Still written and never read, deliberately or not yet:
 
 - `operator_notifications` — largely superseded by the specific queues (`/intake`,

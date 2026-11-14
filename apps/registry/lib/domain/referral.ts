@@ -19,7 +19,10 @@ import { getDb } from '@h-hallows/core/db';
 import { audit, type AuditContext } from '@/lib/audit';
 import { emit } from '@/lib/metrics';
 import { asISODate, civilLA, eligibility, formatISODate, writtenStatementDueOn } from '@h-hallows/core/domain';
-import type { CredentialLike } from '@h-hallows/core/domain';
+import {
+  ASSIGNMENT_LOG_INSERT, assignmentBlockedReason, assignmentMissing, feeBasisOf,
+} from '@h-hallows/core/domain';
+import type { AssignmentFacts, CredentialLike } from '@h-hallows/core/domain';
 
 /**
  * Which care types are private duty nursing under Civil Code § 1812.524. Defined in
@@ -84,7 +87,7 @@ export async function makeReferral(
   const writtenDue = writtenStatementDueOn(today);
 
   return handle.transaction(async (tx) => {
-    await assertCaseReferable(tx, input.caseId);
+    const facts = await assertCaseReferable(tx, input.caseId);
     await assertProviderEligible(tx, input.providerId, now);
 
     const disclosureTimeline = await insertTimeline(tx, {
@@ -142,6 +145,37 @@ export async function makeReferral(
 
     if (input.fromRequestId) {
       await linkRequest(tx, input.fromRequestId, input.caseId, input.providerId, referral.id);
+    }
+
+    /**
+     * § 1812.529. The log sheet is part of what a referral is, not a form filled in
+     * afterwards: trg_assignment_logged (core migration 0023) checks for it at COMMIT,
+     * so a nursing referral that reached the database without one would roll this whole
+     * transaction back. The statement lives in core so the seed and this path produce
+     * identical entries, and it derives every field from the rows above rather than
+     * taking them as arguments — no caller can log a patient address that is not the
+     * one on the household record.
+     */
+    if (isSkilled(facts.care)) {
+      const basis = feeBasisOf(facts.feePct);
+      if (!basis) throw new ReferralError(assignmentBlockedReason(['fee_basis']));
+      const [sheet] = await tx.query<{ id: string }>(
+        // null: the entry is made now, with the referral it records.
+        ASSIGNMENT_LOG_INSERT, [referral.id, basis, ctx.actor, null]);
+      if (!sheet) throw new ReferralError('Could not write the assignment log entry.');
+      await audit({
+        ...ctx,
+        action: 'create',
+        entity: 'assignment',
+        entityId: sheet.id,
+        diff: {
+          caseId: input.caseId,
+          providerId: input.providerId,
+          referralId: referral.id,
+          feeBasis: basis,
+          section: 'Civil Code § 1812.529',
+        },
+      }, tx);
     }
 
     await emit('referral_made', { caseId: input.caseId, providerId: input.providerId },
@@ -213,9 +247,26 @@ async function linkRequest(
   );
 }
 
-async function assertCaseReferable(tx: Tx, caseId: string): Promise<void> {
-  const [row] = await tx.query<{ status: string; care: string; physician_name: string | null }>(
-    `SELECT c.status, c.care, h.physician_name
+/**
+ * Returns the facts a § 1812.529 log sheet is written from, having refused the referral
+ * if any of them is missing.
+ *
+ * The refusal happens here, before the disclosure row, for a reason about the real-world
+ * order of events: the operator says the disclosure out loud to a person and then
+ * records it. A referral that failed on a missing patient address after that would leave
+ * the spoken act with nothing to show for it, and § 1812.5095(f) asks for the record of
+ * the act, not a second attempt. Which is also why the same check runs on the match
+ * screen, from the same list — so the modal does not open on a case that cannot be
+ * referred.
+ */
+async function assertCaseReferable(tx: Tx, caseId: string): Promise<AssignmentFacts> {
+  const [row] = await tx.query<{
+    status: string; care: string; physician_name: string | null;
+    cr_name: string | null; cr_address: string | null;
+    starts_on: string | Date | null; fee_pct: string | null;
+  }>(
+    `SELECT c.status, c.care, h.physician_name, h.cr_name, h.cr_address,
+            c.starts_on, c.fee_pct
        FROM cases c JOIN households h ON h.id = c.household_id
       WHERE c.id = $1 AND c.deleted_at IS NULL`,
     [caseId],
@@ -231,6 +282,18 @@ async function assertCaseReferable(tx: Tx, caseId: string): Promise<void> {
       'A skilled case cannot be referred without an ordering physician on the household record.',
     );
   }
+
+  const facts: AssignmentFacts = {
+    care: row.care,
+    patientName: row.cr_name,
+    patientAddress: row.cr_address,
+    attendingPhysician: row.physician_name,
+    startsOn: row.starts_on,
+    feePct: row.fee_pct,
+  };
+  const missing = assignmentMissing(facts);
+  if (missing.length > 0) throw new ReferralError(assignmentBlockedReason(missing));
+  return facts;
 }
 
 async function assertProviderEligible(tx: Tx, providerId: string, now: Date): Promise<void> {

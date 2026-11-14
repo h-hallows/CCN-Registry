@@ -48,6 +48,7 @@ import {
 import {
   acceptSubmission, rejectSubmission, SubmissionError,
 } from '@/lib/domain/credentialSubmissions';
+import { fileCorrection, fileMissingEntry, RegisterError } from '@/lib/queries/register';
 
 const uuid = z.string().uuid();
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected a date');
@@ -81,6 +82,7 @@ function messageOf(err: unknown): string {
   if (err instanceof DocumentError) return err.message;
   if (err instanceof SubmissionError) return err.message;
   if (err instanceof MeasureError) return err.message;
+  if (err instanceof RegisterError) return err.message;
   if (err instanceof z.ZodError) return err.issues[0]?.message ?? 'Check the form.';
   if (err instanceof Error) return err.message;
   return 'Something went wrong.';
@@ -1200,6 +1202,78 @@ export async function recordMonthHoursAction(
     revalidatePath(`/cases/${parsed.caseId}`);
     revalidatePath('/measure');
     return { ok: `Recorded ${parsed.hours} hours for ${monthLabel(`${parsed.month}-01`)}.` };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+/**
+ * § 1812.529 — file a correction to a log sheet.
+ *
+ * Nothing is edited. The correction is a new entry naming what the old one should have
+ * said, pointing at it, with a note that is required by a CHECK constraint as well as by
+ * the function behind this. Both sheets stay in the register, which is the point: "no
+ * false entries" is easier to answer for when nothing can be rewritten.
+ */
+export async function fileAssignmentCorrectionAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const parsed = z.object({
+      entryId: uuid,
+      patientName: z.string().trim().min(2, 'Name the patient.'),
+      patientAddress: z.string().trim().min(5, 'Give the address care is given at.'),
+      attendingPhysician: z.string().trim().min(2, 'Name the attending physician.'),
+      serviceFrom: isoDate,
+      serviceTo: isoDate.or(z.literal('')),
+      feeBasis: z.string().trim().min(3, 'State the fee charged, as it was charged.'),
+      note: z.string().trim().min(10, 'Say what was wrong with the original entry.'),
+    }).parse({
+      entryId: form.get('entryId'),
+      patientName: form.get('patientName'),
+      patientAddress: form.get('patientAddress'),
+      attendingPhysician: form.get('attendingPhysician'),
+      serviceFrom: form.get('serviceFrom'),
+      serviceTo: form.get('serviceTo') ?? '',
+      feeBasis: form.get('feeBasis'),
+      note: form.get('note'),
+    });
+
+    await fileCorrection(ctx, {
+      entryId: parsed.entryId,
+      patientName: parsed.patientName,
+      patientAddress: parsed.patientAddress,
+      attendingPhysician: parsed.attendingPhysician,
+      serviceFrom: parsed.serviceFrom,
+      serviceTo: parsed.serviceTo || null,
+      feeBasis: parsed.feeBasis,
+      note: parsed.note,
+    });
+
+    revalidatePath('/register');
+    return { ok: 'Correction filed. The entry it replaces stays in the register.' };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+/**
+ * § 1812.529 — file the entry a referral made before the commit check should have had.
+ *
+ * The facts come from the household record and `created_at` is today, so the register
+ * shows the entry as filed late. There is no backdating here, deliberately: a sheet
+ * claiming to have been written at the time would be the clearest false entry there is.
+ */
+export async function fileMissingAssignmentEntryAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const referralId = uuid.parse(form.get('referralId'));
+    await fileMissingEntry(ctx, referralId);
+    revalidatePath('/register');
+    return { ok: 'Entered, dated today. The register shows it was filed late.' };
   } catch (err) {
     return fail(messageOf(err));
   }
