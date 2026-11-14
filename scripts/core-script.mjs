@@ -45,6 +45,29 @@ try {
 
 const target = join(coreSrc, relativePath);
 
+/*
+ * SAY WHICH DATABASE THIS IS ABOUT TO TOUCH.
+ *
+ * This spawns tsx directly, so none of the app's `.env` files are loaded — Next does
+ * that, and this is not Next. With DATABASE_URL unset, core falls back to an embedded
+ * PGlite at ./.pglite, and the migration then succeeds loudly against a directory no
+ * application uses. `npm run db:migrate` printing "applied 0021" while the console
+ * carries on against the Postgres named in apps/registry/.env is the worst kind of
+ * success: there is nothing to notice.
+ *
+ * So name it. The path is printed absolute, because `./.pglite` resolves against this
+ * script's cwd and not the caller's, which is the other half of the same confusion.
+ */
+if (!process.env.DATABASE_URL?.trim()) {
+  const dir = resolve(repoRoot, process.env.PGLITE_DIR ?? './.pglite');
+  console.warn(
+    `DATABASE_URL is not set, so this will use the embedded PGlite at:\n  ${dir}\n`
+    + 'App .env files are NOT read here. To act on the database the console actually\n'
+    + 'uses, export DATABASE_URL first:\n'
+    + '  DATABASE_URL=postgres://ccn:ccn@localhost:5433/ccn_registry npm run db:migrate\n',
+  );
+}
+
 // --import tsx rather than `npx tsx`: no network lookup, no second package manager
 // process, and it fails immediately if tsx is missing instead of offering to install it.
 const child = spawn(process.execPath, ['--import', 'tsx', target, ...passThrough], {
