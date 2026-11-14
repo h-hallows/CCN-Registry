@@ -144,7 +144,7 @@ export async function listProvidersWithStanding(
   }
   const historyById = new Map(history.map((h) => [String(h.provider_id), h] as const));
 
-  await auditRead(ctx, 'providers');
+  await auditRead(ctx, 'provider');
 
   return providers.map((raw) => {
     const provider = toProvider(raw);

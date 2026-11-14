@@ -59,7 +59,7 @@ export async function listPendingSubmissions(
       ORDER BY s.submitted_at ASC`,
   );
 
-  await auditRead(ctx, 'credential_submissions');
+  await auditRead(ctx, 'credential_submission');
 
   return rows.map((r) => ({
     id: String(r.id),
@@ -122,7 +122,7 @@ export async function listReviewedSubmissions(
     [limit],
   );
 
-  await auditRead(ctx, 'credential_submissions');
+  await auditRead(ctx, 'credential_submission');
 
   return rows.map((r) => ({
     id: String(r.id),

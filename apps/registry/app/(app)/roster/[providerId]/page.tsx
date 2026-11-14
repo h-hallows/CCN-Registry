@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { CareType } from '@h-hallows/core/schema';
 import { requireOperator } from '@/lib/operator';
@@ -95,7 +96,19 @@ export default async function ProviderPage({
         </Banner>
       ) : null}
 
-      <Section title="Profile">
+      <Section
+        title="Profile"
+        right={
+          <Link
+            href={`/audit?provider=${provider.id}`}
+            className="text-xs underline underline-offset-4"
+            style={{ color: 'var(--ink-faint)' }}
+            title="Everything recorded about this provider, their credentials, their submissions and the referrals they were named in."
+          >
+            Who has looked at this provider
+          </Link>
+        }
+      >
         <div className="grid gap-x-6 gap-y-4 px-4 py-4 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Phone">{provider.phone ?? '—'}</Field>
           <Field label="Email">{provider.email ?? '—'}</Field>

@@ -114,7 +114,7 @@ export async function benchesFor(ctx: AuditContext, caseId: string): Promise<Ben
     [ids],
   );
 
-  await auditRead(ctx, 'published_shortlist', caseId);
+  await auditRead(ctx, 'case', caseId, { read: 'the published bench' });
 
   return benches.map((b) => ({
     shortlistId: b.id,
@@ -385,7 +385,7 @@ export async function pendingRequests(ctx: AuditContext): Promise<PendingRequest
       ORDER BY r.requested_at`,
   );
 
-  await auditRead(ctx, 'shortlist_requests');
+  await auditRead(ctx, 'shortlist_request');
 
   return rows.map((r) => ({
     requestId: r.id,
@@ -519,7 +519,7 @@ export async function feedbackForCase(
     [caseId],
   );
 
-  if (rows.length > 0) await auditRead(ctx, 'referral_feedback', caseId);
+  if (rows.length > 0) await auditRead(ctx, 'case', caseId, { read: 'referral feedback' });
 
   return rows.map((r) => ({
     id: r.id,

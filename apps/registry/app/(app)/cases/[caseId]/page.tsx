@@ -109,7 +109,19 @@ export default async function CasePage({
         </Banner>
       ) : null}
 
-      <Section title="Household">
+      <Section
+        title="Household"
+        right={
+          <Link
+            href={`/audit?household=${h.id}`}
+            className="text-xs underline underline-offset-4"
+            style={{ color: 'var(--ink-faint)' }}
+            title="Everything recorded about this household, its cases, its referrals and its documents — reads included."
+          >
+            Who has looked at this household
+          </Link>
+        }
+      >
         <div className="grid gap-x-6 gap-y-4 px-4 py-4 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Person engaging care">
             {h.dmName}

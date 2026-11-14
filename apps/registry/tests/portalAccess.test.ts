@@ -96,7 +96,10 @@ describe('granting access', () => {
     expect(timeline[0]!.body).toContain(email);
 
     const logs = await db.query<{ diff: unknown }>(
-      `SELECT diff FROM audit_log WHERE entity = 'portal_access' ORDER BY at DESC LIMIT 1`,
+      // Recorded against the `users` row it created, not under an entity with no table.
+      `SELECT diff FROM audit_log
+        WHERE entity = 'user' AND action IN ('create', 'update')
+        ORDER BY at DESC LIMIT 1`,
     );
     const diff = JSON.stringify(logs[0]!.diff);
     expect(diff).toContain(email);

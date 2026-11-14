@@ -19,6 +19,7 @@ const NAV = [
   { href: '/submissions', label: 'Submissions' },
   { href: '/partners', label: 'Partners' },
   { href: '/compliance', label: 'Compliance' },
+  { href: '/audit', label: 'Audit' },
 ];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {

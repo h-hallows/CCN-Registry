@@ -192,7 +192,7 @@ export async function shortlistFor(
   const result = await screenCase(db, caseId, today);
   if (!result) return null;
 
-  await auditRead(ctx, 'shortlist', caseId);
+  await auditRead(ctx, 'case', caseId, { read: 'the candidate list' });
   await emit('shortlist_generated', { caseId },
     { candidateCount: result.eligible.length, excludedCount: result.excluded.length });
 

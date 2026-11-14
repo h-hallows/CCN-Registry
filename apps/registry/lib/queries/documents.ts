@@ -14,6 +14,7 @@
 import { createHash } from 'node:crypto';
 import { getDb, type Tx } from '@h-hallows/core/db';
 import { audit, auditRead, type AuditContext } from '@/lib/audit';
+import type { AuditEntity } from '@h-hallows/core/domain';
 import { insertTimeline } from '@/lib/domain/referral';
 
 export class DocumentError extends Error {}
@@ -109,6 +110,20 @@ const COLUMN: Record<Subject['kind'], string> = {
   case: 'case_id',
 };
 
+/**
+ * The audit entity a document read is recorded against.
+ *
+ * It is the SUBJECT, not the document: a read of a household's documents has to turn up
+ * when someone asks who looked at that household, and recording it as ('documents',
+ * householdId) put a household's id under an entity whose table is `documents`, where no
+ * query would ever find it.
+ */
+const SUBJECT_ENTITY = {
+  provider: 'provider',
+  household: 'household',
+  case: 'case',
+} as const satisfies Record<Subject['kind'], AuditEntity>;
+
 export async function documentsFor(
   ctx: AuditContext,
   subject: Subject,
@@ -120,7 +135,9 @@ export async function documentsFor(
       ORDER BY uploaded_at DESC`,
     [subject.id],
   );
-  if (rows.length > 0) await auditRead(ctx, 'documents', subject.id);
+  if (rows.length > 0) {
+    await auditRead(ctx, SUBJECT_ENTITY[subject.kind], subject.id, { read: 'documents' });
+  }
   return rows.map(asRow);
 }
 
@@ -139,7 +156,15 @@ export async function documentsForCase(
       ORDER BY uploaded_at DESC`,
     [caseId, householdId],
   );
-  if (rows.length > 0) await auditRead(ctx, 'documents', caseId);
+  /*
+   * Two reads, because two subjects were read. Recording only the case would leave
+   * the household's own documents unaccounted for on the household's trail, which is
+   * the question § 3.8 is for.
+   */
+  if (rows.length > 0) {
+    await auditRead(ctx, 'case', caseId, { read: 'documents' });
+    await auditRead(ctx, 'household', householdId, { read: 'documents, via the case' });
+  }
   return {
     onTheCase: rows.filter((r) => r.scope === 'case').map(asRow),
     onTheHousehold: rows.filter((r) => r.scope === 'household').map(asRow),
@@ -319,7 +344,7 @@ export async function readDocument(
  * the screen that lists it.
  */
 export async function recordDownload(ctx: AuditContext, id: string): Promise<void> {
-  await auditRead(ctx, 'document_bytes', id);
+  await auditRead(ctx, 'document', id, { read: 'the file itself' });
 }
 
 /**

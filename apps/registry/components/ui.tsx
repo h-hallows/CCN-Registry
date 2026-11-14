@@ -216,3 +216,22 @@ export function shortDateTime(iso: string): string {
   return `${Number(get('day'))} ${MONTHS[Number(get('month')) - 1]} ${get('year')} `
     + `${get('hour')}:${get('minute')}`;
 }
+
+/**
+ * A timestamp with seconds, for the audit screen.
+ *
+ * `shortDateTime` stops at the minute, which is right everywhere else and wrong here: a
+ * dozen entries stamped 21:15 are a sequence you cannot check, and the order things were
+ * read in is sometimes the whole question.
+ */
+export function preciseDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'America/Los_Angeles',
+    day: 'numeric', month: 'numeric', year: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).formatToParts(d);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${get('day')}/${get('month')}/${get('year')} ${get('hour')}:${get('minute')}:${get('second')}`;
+}

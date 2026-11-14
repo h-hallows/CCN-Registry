@@ -258,10 +258,50 @@ in the middle.
 All five are closed: `/intake`, `/applications`, the § 1812.527 section on `/compliance`,
 and consent on the case screen.
 
+### 7.1 `audit_log` — written from day one, and unreadable
+
+This one was not a missing screen. `audit_log` has been written faithfully since 0001,
+and the question § 3.8 exists for — **who looked at this household** — had no query
+behind it.
+
+`entity` is free text and every call site chose its own words, so the table held
+`document` beside `documents` and `case` beside `cases`; a query for one silently missed
+the other. Worse, `entity_id` did not mean the same thing twice. A read of a case's bench
+went in as `('shortlist', caseId)` and a read of its documents as `('documents', caseId)`
+— the entity naming one table, the id belonging to another. The pair was not a key into
+anything.
+
+That is the dangerous direction. Over-reporting is loud; under-reporting shows a short,
+clean history for a household that was read all afternoon, and nothing distinguishes it
+from one nobody touched.
+
+Closed:
+
+- `AUDIT_ENTITIES` in core is a closed set, each entity bound to its table and carrying
+  the SQL that selects the rows of that table which are about a given household or
+  provider. The union is the subject's span, and a row is on the trail when its
+  `entity_id` is in it.
+- The paths are curated, because they must be: `households` reach `providers` through
+  `referrals`, and a provider is not "about" one household, so the foreign-key graph
+  cannot be walked for this. The curation is checked instead of trusted — every table is
+  either audited through an entity or listed in `UNAUDITED_TABLES` with a reason, and CI
+  fails if a new table is neither.
+- Each span fragment is executed against the seeded database and the ids it returns are
+  asserted to be rows of its own table. A fragment selecting `case_id` where `id` was
+  meant would return plausible uuids matching no audit row.
+- Migration 0021 holds the same vocabulary as a CHECK, `NOT VALID`: the table is
+  append-only because that is what makes it evidence, so the drifted rows stay as written
+  and the constraint binds every insert from here on. A test asserts the SQL list and the
+  TypeScript list are identical.
+- The historical rows are still attributed, because the match is on the id alone — a
+  `gen_random_uuid()` belongs to one row whatever the entity column says. Where the two
+  disagree the trail marks the row and `/audit` counts it.
+- `/audit` answers it three ways: by household, by provider, by actor. Reading a
+  household's trail is recorded as a read of that household, so the audit screen is not
+  the one place in the console you can look from without leaving a mark.
+
 Still written and never read, deliberately or not yet:
 
-- `audit_log` — there is no screen. § 3.8 exists so "who looked at this household" is
-  answerable later, and today the answer is "run SQL". **Worth building.**
 - `metric_events` — § 8's funnel is recorded and never displayed.
 - `operator_notifications` — largely superseded by the specific queues (`/intake`,
   `/requests`, `/submissions`, `/applications`), which are better than one undifferentiated

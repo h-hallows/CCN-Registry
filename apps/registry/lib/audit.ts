@@ -10,6 +10,7 @@
  * question (COUNSEL.md question 4).
  */
 import { getDb, type Tx } from '@h-hallows/core/db';
+import { AUDIT_ENTITIES, isAuditView, type AuditEntity, type AuditView } from '@h-hallows/core/domain';
 
 export type AuditAction = 'read' | 'create' | 'update' | 'soft_delete';
 
@@ -21,9 +22,42 @@ export interface AuditContext {
 
 export interface AuditRecord extends AuditContext {
   action: AuditAction;
-  entity: string;
+  /**
+   * From the closed vocabulary in @h-hallows/core/domain, and nowhere else. The names
+   * drifted when this was a string — `document` beside `documents`, `case` beside
+   * `cases` — and a query for one silently missed the other. Migration 0021 holds the
+   * same list as a CHECK, so an entity added here without a migration is caught twice.
+   */
+  entity: AuditEntity | AuditView;
+  /**
+   * The primary key of `entity`'s OWN table, or null.
+   *
+   * This is the part that was wrong. A read of a case's bench used to be recorded as
+   * ('shortlist', caseId) — the entity naming one table and the id belonging to
+   * another — so the pair was not a key into anything and "who looked at this
+   * household" had no query. What was being looked at belongs in `diff`; the pair
+   * names the subject.
+   */
   entityId?: string | null;
   diff?: unknown;
+}
+
+/**
+ * A view carries no id by design: it is a screen, not a record. Passing one would put a
+ * uuid under an entity that has no table to look it up in, which is the shape of the
+ * bug this vocabulary exists to stop — so it throws here rather than being written.
+ */
+function assertIdBelongs(record: AuditRecord): void {
+  if (record.entityId == null) return;
+  if (isAuditView(record.entity)) {
+    throw new Error(
+      `audit: '${record.entity}' is a view and cannot carry an id (${record.entityId}). `
+      + 'Record it against the subject it is about instead.',
+    );
+  }
+  if (!(record.entity in AUDIT_ENTITIES)) {
+    throw new Error(`audit: '${record.entity}' is not a known entity`);
+  }
 }
 
 /**
@@ -36,6 +70,7 @@ export interface AuditRecord extends AuditContext {
  * read — but a write that matters should go in with the row it is about.
  */
 export async function audit(record: AuditRecord, tx?: Tx): Promise<void> {
+  assertIdBelongs(record);
   const run = tx ?? (await getDb());
   await run.query(
     `INSERT INTO audit_log (actor, action, entity, entity_id, diff, ip, user_agent)
@@ -59,11 +94,13 @@ export async function audit(record: AuditRecord, tx?: Tx): Promise<void> {
  */
 export async function auditRead(
   ctx: AuditContext,
-  entity: string,
+  entity: AuditEntity | AuditView,
   entityId?: string | null,
+  /** What was read, where the subject alone does not say it: `{ read: 'bench' }`. */
+  diff?: unknown,
 ): Promise<void> {
   try {
-    await audit({ ...ctx, action: 'read', entity, entityId });
+    await audit({ ...ctx, action: 'read', entity, entityId, diff });
   } catch (err) {
     console.error('[audit] failed to record read', { entity, entityId }, err);
   }

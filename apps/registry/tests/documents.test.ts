@@ -211,18 +211,22 @@ describe('reading them back', () => {
       bytes: pdf('live scan result'),
     });
 
-    const before = await db.query(
-      `SELECT 1 FROM audit_log WHERE entity = 'document_bytes' AND entity_id = $1`,
-      [filed.id]);
-    expect(before).toHaveLength(0);
+    /*
+     * Listing documents is recorded against their SUBJECT — the provider, household or
+     * case whose documents were listed — so the only thing that records a read against
+     * one document's own id is fetching its bytes. `document_bytes` used to be the
+     * entity; it was not a table, so nothing could look the id up in it.
+     */
+    const opened = `SELECT 1 FROM audit_log
+                     WHERE entity = 'document' AND entity_id = $1
+                       AND diff ->> 'read' = 'the file itself'`;
+
+    expect(await db.query(opened, [filed.id])).toHaveLength(0);
 
     const { recordDownload } = await import('@/lib/queries/documents');
     await recordDownload(TEST_CTX, filed.id);
 
-    const after = await db.query(
-      `SELECT 1 FROM audit_log WHERE entity = 'document_bytes' AND entity_id = $1`,
-      [filed.id]);
-    expect(after).toHaveLength(1);
+    expect(await db.query(opened, [filed.id])).toHaveLength(1);
   });
 });
 

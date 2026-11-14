@@ -70,7 +70,7 @@ export async function consentsFor(
       ORDER BY granted_at DESC`,
     [householdId],
   );
-  if (rows.length > 0) await auditRead(ctx, 'consent', householdId);
+  if (rows.length > 0) await auditRead(ctx, 'household', householdId, { read: 'consents' });
   return rows.map((r) => ({
     id: r.id,
     kind: r.kind as ConsentKind,

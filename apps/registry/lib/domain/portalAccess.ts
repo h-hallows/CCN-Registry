@@ -29,11 +29,23 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { getDb, type Tx } from '@h-hallows/core/db';
 import { audit, auditRead, type AuditContext } from '@/lib/audit';
+import type { AuditEntity } from '@h-hallows/core/domain';
 import { insertTimeline } from '@/lib/domain/referral';
 
 export class AccessError extends Error {}
 
 export type PortalSubjectKind = 'household' | 'provider' | 'partner';
+
+/**
+ * The audit entity a portal-access read is recorded against: the subject whose accounts
+ * were listed, so the read appears on that subject's trail rather than under an entity
+ * with no table to look the id up in.
+ */
+const SUBJECT_ENTITY = {
+  household: 'household',
+  provider: 'provider',
+  partner: 'referral_partner',
+} as const satisfies Record<PortalSubjectKind, AuditEntity>;
 
 /**
  * A closed map, so the table and column names below are literals from this file and
@@ -127,7 +139,7 @@ export async function portalUsersFor(
     [subjectId],
   );
 
-  await auditRead(ctx, 'portal_user', subjectId);
+  await auditRead(ctx, SUBJECT_ENTITY[kind], subjectId, { read: 'portal accounts' });
 
   return rows.map((r) => ({
     userId: r.id,
@@ -177,7 +189,7 @@ export async function portalUsersForMany(
     [subjectIds],
   );
 
-  await auditRead(ctx, 'portal_user');
+  await auditRead(ctx, 'user');
 
   for (const r of rows) {
     out.get(r.subject_id)?.push({
@@ -316,7 +328,7 @@ export async function grantPortalAccess(
     await audit({
       ...ctx,
       action: existing ? 'update' : 'create',
-      entity: 'portal_access',
+      entity: 'user',
       entityId: userId,
       diff: {
         kind: input.kind,
@@ -394,7 +406,7 @@ export async function reissuePortalLink(
     await audit({
       ...ctx,
       action: 'update',
-      entity: 'portal_access',
+      entity: 'user',
       entityId: userId,
       diff: { reissued: true, email: user.email, linkExpiresAt: invite.expires_at },
     }, tx);
@@ -460,7 +472,7 @@ export async function revokePortalAccess(
     await audit({
       ...ctx,
       action: 'update',
-      entity: 'portal_access',
+      entity: 'user',
       entityId: userId,
       diff: { disabledAt: { from: null, to: 'now' }, email: user.email, reason: reason.trim() },
     }, tx);
@@ -492,7 +504,7 @@ export async function restorePortalAccess(
     await audit({
       ...ctx,
       action: 'update',
-      entity: 'portal_access',
+      entity: 'user',
       entityId: userId,
       diff: { disabledAt: { from: user.disabled_at, to: null }, email: user.email, reason: reason.trim() },
     }, tx);

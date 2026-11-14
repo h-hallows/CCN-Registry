@@ -117,7 +117,13 @@ export async function consumeMagicLink(token: string): Promise<Operator | null> 
   const operator: Operator = {
     id: row.user_id, email: row.email, displayName: row.display_name, role: row.role,
   };
-  await audit({ actor: operator.email, action: 'create', entity: 'session', entityId: operator.id });
+  /*
+   * No id. The row that was created is a `sessions` row, nothing reads one back, and
+   * `actor` already names the operator who signed in — putting their users id under an
+   * entity whose table is `sessions` is exactly the mismatch this vocabulary exists to
+   * stop.
+   */
+  await audit({ actor: operator.email, action: 'create', entity: 'operator_session' });
   return operator;
 }
 

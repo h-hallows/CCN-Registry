@@ -132,7 +132,7 @@ export async function listCases(
       ORDER BY c.created_at DESC`,
     [filter?.status ?? null],
   );
-  await auditRead(ctx, 'cases');
+  await auditRead(ctx, 'case');
   return rows.map((r) => ({
     id: String(r.id),
     status: r.status as CaseStatusValue,
@@ -304,7 +304,10 @@ export async function logCall(
       await emit('first_contact', { caseId }, {}, tx);
     }
   });
-  await audit({ ...ctx, action: 'create', entity: 'timeline_entry', diff: { caseId, type: 'call' } });
+  await audit({
+    ...ctx, action: 'create', entity: 'case', entityId: caseId,
+    diff: { wrote: 'timeline entry', type: 'call' },
+  });
 }
 
 /** A free-text note. I10: nothing here generates, suggests or templates content. */
@@ -313,5 +316,8 @@ export async function addNote(ctx: AuditContext, caseId: string, body: string): 
   await handle.transaction((tx) =>
     insertTimeline(tx, { caseId, type: 'note', author: ctx.actor, body }),
   );
-  await audit({ ...ctx, action: 'create', entity: 'timeline_entry', diff: { caseId, type: 'note' } });
+  await audit({
+    ...ctx, action: 'create', entity: 'case', entityId: caseId,
+    diff: { wrote: 'timeline entry', type: 'note' },
+  });
 }
