@@ -83,7 +83,7 @@ true on every date, which this one never did.
 
 | Obligation | State |
 |---|---|
-| **§ 1812.533(c)** advertising record | `advertising_log` created in migration 0004, **never written to by anything**. Same shape of problem as the assignment log before last session: a present, empty table reads as compliance. Worse than empty, in fact — it holds a single `published_on` date, and the only publication this registry has is a website, which does not appear on a date; it runs until something replaces it. The table as built cannot answer the question the section exists to ask ("what was advertised on 3 March, and where"). Work started and parked. |
+| **§ 1812.533(c)** advertising record | **Built — core 0025, `/advertising`.** Was: `advertising_log` created in migration 0004, **never written to by anything**. Same shape of problem as the assignment log before last session: a present, empty table reads as compliance. Worse than empty, in fact — it holds a single `published_on` date, and the only publication this registry has is a website, which does not appear on a date; it runs until something replaces it. The table as built cannot answer the question the section exists to ask ("what was advertised on 3 March, and where"). Work started and parked. |
 | **§ 1812.527** fee schedule | Built and screened. Nothing outstanding. |
 | **§ 1812.528** licence inspection | Built, gated, and tested in two suites. |
 | **§ 1812.529** assignment log | Built last session. `/register`, enforced at COMMIT. |
@@ -170,6 +170,10 @@ are cheap to add in the same migration and there is no reason to triage them sep
 
 One migration, no behaviour change, no risk.
 
+> **Done — core migration 0024.** All 23, plus a structural test that asks the catalogue
+> rather than the migrations and fails if a future foreign key arrives without a leading
+> index. The live dev database now reports zero. Closes §5.4 as well.
+
 ### 4.2 Eight query modules have no `LIMIT` in them
 
 `bench.ts`, `cases.ts`, `compliance.ts`, `consent.ts`, `match.ts`, `providers.ts`,
@@ -230,10 +234,8 @@ vocabulary drift. The gaps that remain:
    That property is exactly the kind that regresses silently. `lib/proState.ts` and
    `lib/profileLimits.ts` are also unmentioned, but both are constants and shapes; this
    one carries a rule.
-4. **No test asserts the index coverage from §4.1**, so it can regress the next time a
-   table is added. A structural test over the live catalogue — every single-column FK has
-   a leading index, or an explicit excuse — is the same pattern as the `STRUCTURAL_COLUMNS`
-   excuse map in `tests/assignment.test.ts` and would hold.
+4. ~~**No test asserts the index coverage from §4.1**~~ — `CCN-core/tests/indexes.test.ts`
+   now does, against the catalogue, with an empty excuse map.
 5. **No test asserts that `DEFERRED.md` is true.** The claim in §3.3 was prose, so nothing
    checked it. The banned-table test already proves tables stay untouched; pointing it at
    the deferral list would have caught this the day it was written.
@@ -265,12 +267,10 @@ Unchanged from `NEXT.md`, restated because it is still what gates the build's va
 
 1. ~~**Fix the failing test**~~ — done; see the note in §2, which also closed a third
    instance of the UTC-date bug.
-2. **The index migration** — §4.1, one file, no behaviour change.
+2. ~~**The index migration**~~ — done; core 0024.
 3. **Resolve `coverage_gaps`** — §3.3. Decide, then make the document and the code agree.
    This is a correctness-of-the-record problem, and it is cheap today.
-4. **Finish the advertising record** — §3.1. It is the last Chapter 7 obligation with no
-   implementation, the work is already started, and the design question (an advertisement
-   runs over a period; the table records a point) is settled.
+4. ~~**Finish the advertising record**~~ — done; core 0025 and `/advertising`.
 5. **Pagination on `/register` and `/cases`** — §4.2, before either table is large rather
    than after.
 6. **Split `actions.ts`** — §4.5, mechanical, and it makes everything after it easier.

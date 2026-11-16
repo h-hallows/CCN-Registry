@@ -49,6 +49,9 @@ import {
   acceptSubmission, rejectSubmission, SubmissionError,
 } from '@/lib/domain/credentialSubmissions';
 import { fileCorrection, fileMissingEntry, RegisterError } from '@/lib/queries/register';
+import {
+  AdvertisingError, correctEntry, recordAdvertisement, withdrawAdvertisement,
+} from '@/lib/queries/advertising';
 
 const uuid = z.string().uuid();
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected a date');
@@ -83,6 +86,7 @@ function messageOf(err: unknown): string {
   if (err instanceof SubmissionError) return err.message;
   if (err instanceof MeasureError) return err.message;
   if (err instanceof RegisterError) return err.message;
+  if (err instanceof AdvertisingError) return err.message;
   if (err instanceof z.ZodError) return err.issues[0]?.message ?? 'Check the form.';
   if (err instanceof Error) return err.message;
   return 'Something went wrong.';
@@ -1274,6 +1278,116 @@ export async function fileMissingAssignmentEntryAction(
     await fileMissingEntry(ctx, referralId);
     revalidatePath('/register');
     return { ok: 'Entered, dated today. The register shows it was filed late.' };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+
+/**
+ * § 1812.533(c) — record an advertisement.
+ *
+ * `carriedName` and `carriedContact` are required because § 1812.533(b)(2) requires them
+ * in the advertisement itself, and the record is the only thing that can show they were
+ * there. The validation below asks for a shape; `recordAdvertisement` asks whether they
+ * are real, and the database refuses a placeholder regardless.
+ */
+export async function recordAdvertisementAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const parsed = z.object({
+      medium: z.string().trim().min(2, 'Choose where it appeared.'),
+      publication: z.string().trim().min(2, 'Name the publication it appeared in.'),
+      appearedFrom: isoDate,
+      appearedTo: isoDate.or(z.literal('')),
+      reference: z.string().trim(),
+      carriedName: z.string().trim().min(2, 'Give the name the advertisement carried.'),
+      carriedContact: z.string().trim().min(5,
+        'Give the address or telephone number it carried — § 1812.533(b)(2) requires one.'),
+    }).parse({
+      medium: form.get('medium'),
+      publication: form.get('publication'),
+      appearedFrom: form.get('appearedFrom'),
+      appearedTo: form.get('appearedTo') ?? '',
+      reference: form.get('reference') ?? '',
+      carriedName: form.get('carriedName'),
+      carriedContact: form.get('carriedContact'),
+    });
+
+    await recordAdvertisement(ctx, {
+      medium: parsed.medium,
+      publication: parsed.publication,
+      appearedFrom: parsed.appearedFrom,
+      appearedTo: parsed.appearedTo || null,
+      reference: parsed.reference || null,
+      carriedName: parsed.carriedName,
+      carriedContact: parsed.carriedContact,
+    });
+
+    revalidatePath('/advertising');
+    return { ok: 'Recorded. The trailing year now accounts for those days.' };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+/**
+ * An advertisement stops appearing. The one mutation the record permits, and it is
+ * permitted once — the day something came down is a fact, not a draft.
+ */
+export async function withdrawAdvertisementAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const parsed = z.object({ entryId: uuid, on: isoDate })
+      .parse({ entryId: form.get('entryId'), on: form.get('on') });
+    await withdrawAdvertisement(ctx, parsed.entryId, parsed.on);
+    revalidatePath('/advertising');
+    return { ok: 'Closed. The entry stays in the record with the day it came down.' };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+/** A correction supersedes an entry. The original stays, struck through and legible. */
+export async function correctAdvertisementAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const parsed = z.object({
+      entryId: uuid,
+      appearedFrom: isoDate,
+      appearedTo: isoDate.or(z.literal('')),
+      reference: z.string().trim(),
+      carriedName: z.string().trim().min(2, 'Give the name the advertisement carried.'),
+      carriedContact: z.string().trim().min(5, 'Give the address or telephone number.'),
+      note: z.string().trim().min(10, 'Say what was wrong with the original entry.'),
+    }).parse({
+      entryId: form.get('entryId'),
+      appearedFrom: form.get('appearedFrom'),
+      appearedTo: form.get('appearedTo') ?? '',
+      reference: form.get('reference') ?? '',
+      carriedName: form.get('carriedName'),
+      carriedContact: form.get('carriedContact'),
+      note: form.get('note'),
+    });
+
+    await correctEntry(ctx, {
+      entryId: parsed.entryId,
+      appearedFrom: parsed.appearedFrom,
+      appearedTo: parsed.appearedTo || null,
+      reference: parsed.reference || null,
+      carriedName: parsed.carriedName,
+      carriedContact: parsed.carriedContact,
+      note: parsed.note,
+    });
+
+    revalidatePath('/advertising');
+    return { ok: 'Correction filed. The entry it replaces stays in the record.' };
   } catch (err) {
     return fail(messageOf(err));
   }
