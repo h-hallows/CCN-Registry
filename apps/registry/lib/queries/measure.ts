@@ -199,6 +199,13 @@ export interface CapacityMonth {
   activeCases: number;
   /** Service failures recorded in it. */
   failures: number;
+  /**
+   * True for the month that has not finished. Decided in SQL from California's date so
+   * one expression settles it, because this row is not comparable with the ones above
+   * it: its `activeCases` is still rising and its `failures` has had fewer days to
+   * accumulate in. On the first of the month it is a row of almost nothing.
+   */
+  partial: boolean;
 }
 
 export interface Capacity {
@@ -206,8 +213,28 @@ export interface Capacity {
   heldNow: number;
   /** Of those, how many have never had a service failure. The measure § 8 asks for. */
   cleanNow: number;
-  /** The most concurrent cases ever held in one month, and when. */
+  /**
+   * The most concurrent cases held in a month that has FINISHED, and when.
+   *
+   * The month in progress is excluded, because "most ever held at once" compared against
+   * a figure that is still climbing is not a comparison. Nothing is hidden by it: the
+   * current month's own number is the first row of the table below this tile.
+   *
+   * Null until one month has completed, which is honest rather than tidy — a registry in
+   * its first month has no finished month to report, and printing this month's figure
+   * there would be the same error with a different sign.
+   */
   peak: { month: string; cases: number } | null;
+  /**
+   * Cases that were held during this month and are not held now, because they ended
+   * part-way through it.
+   *
+   * This is the whole of the difference between `heldNow` and the current month's
+   * `activeCases`, and it is here so the screen can state it rather than leave two
+   * numbers a hand's width apart to be reconciled by whoever is looking. See the note
+   * in `capacity()` on why they are different measures and must stay so.
+   */
+  endedThisMonth: number;
   months: CapacityMonth[];
   failuresByKind: { kind: ServiceFailureKind; failures: number }[];
 }
@@ -216,28 +243,55 @@ export async function capacity(ctx: AuditContext): Promise<Capacity> {
   const { query } = await getDb();
 
   /*
-   * HELD, DEFINED ONCE: referred and not ended.
+   * HELD: referred and not ended.
    *
    * `referred_on` rather than `created_at`, because an enquiry sitting in the queue is
    * not capacity being held — it is capacity not yet used, and counting it would make a
    * backlog look like throughput.
    *
    * It includes a case that is `referred` and not yet started, and one that is `paused`.
-   * § 8 asks whether she can hold twelve where she held six, and both of those are carried:
-   * the referred case is a household waiting on a first shift and the paused one is a
-   * relationship still being managed. The first version of this screen counted `status =
-   * 'active'` for "now" and this definition for every past month, so the current month
-   * disagreed with itself by one case — which is the whole reason it is written down here
-   * and used in both places.
+   * § 8 asks whether she can hold twelve where she held six, and both of those are
+   * carried: the referred case is a household waiting on a first shift and the paused one
+   * is a relationship still being managed. The first version of this screen counted
+   * `status = 'active'` for "now" and this definition for every past month, so the
+   * current month disagreed with the figure printed above it by one case.
+   *
+   * TWO MEASURES, NOT ONE DEFINITION TWICE. The fix for that defect wrote "held, defined
+   * once" here and then wrote it twice in SQL anyway, because the two questions are not
+   * the same question:
+   *
+   *   - a month asks how many cases were held AT ANY POINT in it, which is the
+   *     concurrency § 8 is about, and
+   *   - "now" asks how many are held AT THIS MOMENT.
+   *
+   * For a month that has finished those are the same number. For the month in progress
+   * they differ by exactly the cases that ended part-way through it, and a test asserting
+   * they were equal passed for as long as no case happened to end in the current month —
+   * then failed on a Sunday with nothing changed but the date. So the difference is
+   * computed (`endedThisMonth`), the unfinished month is flagged (`partial`), and the
+   * screen states the relationship instead of implying there is none.
+   *
+   * CALIFORNIA'S DATE, not the server's. `current_date` on a managed Postgres is UTC,
+   * and nothing in this codebase sets a connection TimeZone. From late afternoon Pacific
+   * on the last day of a month, `date_trunc('month', current_date)` is already next
+   * month: the series grew a row for a month that had not started, holding every case as
+   * though it had carried into it, and the "partial" flag would have landed on it. Third
+   * instance of this bug in this repository; the other two are in V1-REVIEW § 2.
    */
-  const months = await query<{ month: string; active: string; failures: string }>(
-    `WITH span AS (
+  const months = await query<
+    { month: string; active: string; failures: string; partial: boolean }
+  >(
+    `WITH today AS (
+       SELECT (now() AT TIME ZONE 'America/Los_Angeles')::date AS d
+     ),
+     span AS (
        SELECT date_trunc('month', generate_series(
                 coalesce((SELECT min(referred_on) FROM cases WHERE referred_on IS NOT NULL),
-                         current_date),
-                current_date, interval '1 month'))::date AS month
+                         (SELECT d FROM today)),
+                (SELECT d FROM today), interval '1 month'))::date AS month
      )
      SELECT s.month::text,
+            s.month = date_trunc('month', (SELECT d FROM today))::date AS partial,
             (SELECT count(*) FROM cases c
               WHERE c.deleted_at IS NULL
                 AND c.referred_on IS NOT NULL
@@ -261,6 +315,32 @@ export async function capacity(ctx: AuditContext): Promise<Capacity> {
         AND c.ended_on IS NULL`,
   );
 
+  /*
+   * The whole of the difference between `heldNow` and the current month's `activeCases`:
+   * cases that were held during this month and have since ended.
+   *
+   * The predicates are the complement of the two queries above, deliberately written out
+   * rather than taken as `active - held`. Subtraction would always produce a number and
+   * the number would always reconcile, because it was made out of the two figures it
+   * reconciles — so the screen would be explaining its own arithmetic. Counted from the
+   * rows, it is a fact about cases, and `tests/measure.test.ts` compares it against an
+   * independent count of the same rows. That comparison catches a disagreement between
+   * the three queries; it cannot catch someone replacing this one with the subtraction,
+   * which is undetectable from outside and is why the reason is written down here.
+   */
+  const [ended] = await query<{ n: string }>(
+    `WITH m AS (
+       SELECT date_trunc('month', (now() AT TIME ZONE 'America/Los_Angeles')::date)::date AS start
+     )
+     SELECT count(*)::text AS n
+       FROM cases c, m
+      WHERE c.deleted_at IS NULL
+        AND c.referred_on IS NOT NULL
+        AND c.referred_on < (m.start + interval '1 month')
+        AND c.ended_on IS NOT NULL
+        AND c.ended_on >= m.start`,
+  );
+
   const kinds = await query<{ kind: string; n: string }>(
     `SELECT kind::text, count(*)::text AS n FROM service_failures
       GROUP BY kind ORDER BY count(*) DESC`,
@@ -272,8 +352,10 @@ export async function capacity(ctx: AuditContext): Promise<Capacity> {
     month: m.month,
     activeCases: Number(m.active),
     failures: Number(m.failures),
+    partial: m.partial,
   }));
-  const peak = shaped.reduce<{ month: string; cases: number } | null>(
+  // Finished months only. See the note on `Capacity.peak`.
+  const peak = shaped.filter((m) => !m.partial).reduce<{ month: string; cases: number } | null>(
     (best, m) => (best === null || m.activeCases > best.cases
       ? { month: m.month, cases: m.activeCases } : best),
     null,
@@ -283,6 +365,7 @@ export async function capacity(ctx: AuditContext): Promise<Capacity> {
     heldNow: Number(now!.held),
     cleanNow: Number(now!.clean),
     peak: peak && peak.cases > 0 ? peak : null,
+    endedThisMonth: Number(ended!.n),
     months: shaped,
     failuresByKind: kinds.map((k) => ({
       kind: k.kind as ServiceFailureKind,
@@ -344,7 +427,12 @@ export async function leakage(ctx: AuditContext, months = 8): Promise<LeakageRow
        JOIN cases c ON c.id = h.case_id
        JOIN households hh ON hh.id = c.household_id
       WHERE c.deleted_at IS NULL
-        AND h.month >= date_trunc('month', current_date) - ($1 || ' months')::interval
+        -- California's date, for the reason given in capacity() above. Here the server's
+        -- would pull in one month more of history from late afternoon Pacific on the
+        -- last day of a month rather than dropping one, which is the same mistake
+        -- wearing a harmless face.
+        AND h.month >= date_trunc('month', (now() AT TIME ZONE 'America/Los_Angeles')::date)
+                       - ($1 || ' months')::interval
       ORDER BY h.case_id, h.month`,
     [String(months)],
   );

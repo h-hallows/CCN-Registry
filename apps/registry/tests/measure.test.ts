@@ -226,17 +226,155 @@ describe('capacity', () => {
     expect(cap.heldNow - cap.cleanNow).toBe(Number(withFailure.n));
   });
 
-  it('uses one definition of held for now and for every past month', async () => {
+  it('accounts for the difference between held now and the month in progress', async () => {
     /*
-     * The defect this exists for: "held now" counted status = 'active' while the month
-     * series counted referred-and-not-ended, so the current month on the screen
-     * disagreed with the figure printed above it by one case — the household that had
-     * been referred and was waiting on a first shift. Two definitions of the same word,
-     * a hand's width apart.
+     * This test has caught two defects and been wrong once itself.
+     *
+     * FIRST DEFECT. "Held now" counted status = 'active' while the month series counted
+     * referred-and-not-ended, so the current month on the screen disagreed with the
+     * figure printed above it by one case — the household that had been referred and was
+     * waiting on a first shift. Two definitions of the same word, a hand's width apart.
+     *
+     * THEN THE TEST ITSELF. The fix asserted the two figures were EQUAL. They are not,
+     * and never were: a month counts every case held AT ANY POINT in it, which is the
+     * concurrency § 8 is about, and "now" counts this moment. For a finished month those
+     * agree. For the month in progress they part company the moment a case ends part-way
+     * through it. The assertion passed for as long as the seed's relative dates happened
+     * to put no ending in the current month, and failed on 15 November 2026 with nothing
+     * changed but the date — which is the worst kind of failing test, because it stops a
+     * release for something that is not a defect and teaches whoever is looking that the
+     * suite cries wolf.
+     *
+     * So what is asserted now is the identity, which holds on every date: the month in
+     * progress exceeds "held now" by exactly the cases that ended inside it.
      */
     const cap = await capacity(TEST_CTX);
     const thisMonth = cap.months[cap.months.length - 1]!;
-    expect(thisMonth.activeCases).toBe(cap.heldNow);
+
+    expect(thisMonth.partial).toBe(true);
+    expect(cap.months.filter((m) => m.partial)).toHaveLength(1);
+
+    // Every case held now was held at some point this month, so the month is never less.
+    expect(thisMonth.activeCases).toBeGreaterThanOrEqual(cap.heldNow);
+    expect(thisMonth.activeCases - cap.heldNow).toBe(cap.endedThisMonth);
+
+    /*
+     * And `endedThisMonth` is counted from the database rather than taken from the
+     * subtraction above, so the identity is checked against the rows and not against one
+     * of its own terms. This is the assertion that would catch a soft-deleted case, or a
+     * future `referred_on`, leaking into one of the two queries and not the other.
+     */
+    const ended = await one<{ n: string }>(
+      `SELECT count(*)::text AS n FROM cases c
+        WHERE c.deleted_at IS NULL
+          AND c.referred_on IS NOT NULL
+          AND c.ended_on IS NOT NULL
+          AND c.ended_on >= date_trunc(
+                'month', (now() AT TIME ZONE 'America/Los_Angeles')::date)`,
+    );
+    expect(cap.endedThisMonth).toBe(Number(ended.n));
+  });
+
+  it('counts only the endings that fall inside the month in progress', async () => {
+    /*
+     * Why this needs a fixture of its own.
+     *
+     * The seed holds exactly ONE ended case, dated relative to the day the suite runs,
+     * so whether it lands inside the current month or the one before is an accident of
+     * the calendar. That accident is what let the old assertion pass for months, and it
+     * also means a sabotage of the month boundary in `endedThisMonth` — deleting the
+     * predicate entirely — changes no figure the seed produces. A test that cannot fail
+     * when the code is broken is not testing the code.
+     *
+     * So this moves one ending across the boundary and back, and asserts the difference
+     * in both directions. Inside a transaction that is rolled back, because the seeded
+     * figures are what the rest of this file asserts against.
+     */
+    const [ended] = await db.query<{ id: string }>(
+      `SELECT id FROM cases WHERE ended_on IS NOT NULL ORDER BY ended_on LIMIT 1`,
+    );
+    expect(ended, 'the seed has no ended case to move').toBeDefined();
+
+    const month = `date_trunc('month', (now() AT TIME ZONE 'America/Los_Angeles')::date)`;
+    await db.query('BEGIN');
+    try {
+      await db.query(
+        `UPDATE cases SET ended_on = ${month}::date WHERE id = $1`, [ended!.id]);
+      const inside = await capacity(TEST_CTX);
+
+      // Two months back: inside the series, inside a month that has finished.
+      await db.query(
+        `UPDATE cases SET ended_on = (${month} - interval '2 months')::date WHERE id = $1`,
+        [ended!.id],
+      );
+      const outside = await capacity(TEST_CTX);
+
+      expect(inside.endedThisMonth).toBe(outside.endedThisMonth + 1);
+      // Moving an ending does not change what is held now — it had already ended.
+      expect(inside.heldNow).toBe(outside.heldNow);
+
+      /*
+       * And a soft-deleted case that ended this month is not a case this registry held.
+       * The seed has none, so without this leg the `deleted_at IS NULL` predicate in
+       * `endedThisMonth` is never exercised and could be deleted with every test still
+       * green — which is how the other two queries on this screen came to disagree in
+       * the first place.
+       */
+      await db.query(
+        `UPDATE cases SET deleted_at = now(), ended_on = ${month}::date
+          WHERE id = (SELECT id FROM cases
+                       WHERE deleted_at IS NULL AND referred_on IS NOT NULL
+                         AND ended_on IS NULL
+                       ORDER BY referred_on LIMIT 1)`,
+      );
+      const softDeleted = await capacity(TEST_CTX);
+      expect(softDeleted.endedThisMonth).toBe(outside.endedThisMonth);
+      expect(softDeleted.heldNow).toBe(outside.heldNow - 1);
+
+      // And the identity holds in all three states, which is the point of it.
+      for (const cap of [inside, outside, softDeleted]) {
+        const m = cap.months[cap.months.length - 1]!;
+        expect(m.activeCases - cap.heldNow).toBe(cap.endedThisMonth);
+      }
+    } finally {
+      await db.query('ROLLBACK');
+    }
+  });
+
+  it('keeps the unfinished month out of the record it cannot be compared with', async () => {
+    const cap = await capacity(TEST_CTX);
+    const finished = cap.months.filter((m) => !m.partial);
+
+    if (finished.length === 0) {
+      // A registry in its first month has no finished month, and saying so is honest.
+      expect(cap.peak).toBeNull();
+      return;
+    }
+    expect(cap.peak).not.toBeNull();
+    expect(cap.peak!.cases).toBe(Math.max(...finished.map((m) => m.activeCases)));
+    expect(cap.months.find((m) => m.month === cap.peak!.month)!.partial).toBe(false);
+  });
+
+  it('decides which month is in progress in California, not on the server', async () => {
+    /*
+     * `current_date` is the server's, and nothing here sets a connection TimeZone, so on
+     * a managed Postgres it is UTC. From late afternoon Pacific on the last day of a
+     * month it is already the first of the next one: the series grew a row for a month
+     * that had not started in California, carrying every open case into it, and the
+     * "in progress" marker landed on a month nobody was in yet. Third instance of this
+     * bug in this repository — V1-REVIEW § 2 has the other two.
+     */
+    const cap = await capacity(TEST_CTX);
+    const la = await one<{ m: string }>(
+      `SELECT date_trunc('month', (now() AT TIME ZONE 'America/Los_Angeles')::date)
+                ::date::text AS m`,
+    );
+    expect(cap.months[cap.months.length - 1]!.month).toBe(la.m);
+
+    // And the fix stays fixed. A date in this module decided by the server is the defect.
+    const src = readFileSync(join(import.meta.dirname, '..', 'lib/queries/measure.ts'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    expect(src, 'measure.ts decides a date from the server clock').not.toMatch(/current_date/);
   });
 
   it('does not count an enquiry still in the queue as capacity held', async () => {

@@ -171,6 +171,8 @@ export default async function MeasurePage() {
 
   const notNested = steps.filter((s) => s.skippedPrevious > 0);
   const maxActive = Math.max(1, ...cap.months.map((m) => m.activeCases));
+  // The month in progress, where there is one. Null only before the first referral.
+  const thisMonth = cap.months.find((m) => m.partial) ?? null;
   const fallingCount = hours.filter((r) => r.trend === 'falling').length;
 
   return (
@@ -282,14 +284,17 @@ export default async function MeasurePage() {
             </p>
           </div>
           <div>
-            <span className="label">Most ever held at once</span>
+            {/*
+              * Finished months only. A record compared against a month that is still
+              * running is not a record, and this month's own figure is the first row of
+              * the table below anyway.
+              */}
+            <span className="label">Most held in a finished month</span>
             <p className="nums text-sm">
               {cap.peak ? `${cap.peak.cases}` : '—'}
-              {cap.peak ? (
-                <span className="ml-2 text-xs" style={{ color: 'var(--ink-faint)' }}>
-                  in {monthLabel(cap.peak.month)}
-                </span>
-              ) : null}
+              <span className="ml-2 text-xs" style={{ color: 'var(--ink-faint)' }}>
+                {cap.peak ? `in ${monthLabel(cap.peak.month)}` : 'no month has finished yet'}
+              </span>
             </p>
           </div>
         </div>
@@ -300,6 +305,40 @@ export default async function MeasurePage() {
           the queue is not: that is capacity not yet used, and counting it would make a
           backlog look like throughput.
         </p>
+        {thisMonth ? (
+          <p className="border-b hair px-4 py-2.5 text-xs leading-relaxed"
+            style={{ color: 'var(--ink-faint)' }}>
+            {/*
+              * The two numbers on this screen that look like they should agree, and the
+              * reason they do not. A month counts every case held at any point in it;
+              * "held now" counts this moment. For a finished month those are the same
+              * figure. For this one they differ by the cases that ended part-way
+              * through, and that number is stated rather than left to be worked out.
+              */}
+            {monthLabel(thisMonth.month)} is still running, so its{' '}
+            <span className="nums">{thisMonth.activeCases}</span>{' '}
+            {thisMonth.activeCases === 1 ? 'case' : 'cases'} are every one held at any
+            point this month.
+            {cap.endedThisMonth > 0 ? (
+              <>
+                {' '}That is the <span className="nums">{cap.heldNow}</span> held right
+                now, plus the{' '}
+                {cap.endedThisMonth === 1
+                  ? 'one that ended'
+                  : <><span className="nums">{cap.endedThisMonth}</span> that ended</>}
+                {' '}earlier in it.
+              </>
+            ) : (
+              <>
+                {' '}Nothing has ended this month, so that is also the number held right
+                now — the two part company the first time a case ends part-way through a
+                month.
+              </>
+            )}
+            {' '}Its service failures have had fewer days to land in than the months above
+            it, which is why it is marked below and kept out of the record beside.
+          </p>
+        ) : null}
 
         {cap.months.length === 0 ? (
           <Empty>No case has been referred yet, so nothing has been held.</Empty>
@@ -319,6 +358,12 @@ export default async function MeasurePage() {
                   <tr key={m.month} className="border-t hair">
                     <td className="px-4 py-2 nums text-sm whitespace-nowrap">
                       {monthLabel(m.month)}
+                      {m.partial ? (
+                        <span className="ml-2 text-[0.6875rem]"
+                          style={{ color: 'var(--ink-faint)' }}>
+                          in progress
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-4 py-2 nums text-sm">{m.activeCases}</td>
                     <td className="px-4 py-2"><Bar value={m.activeCases} max={maxActive} /></td>
