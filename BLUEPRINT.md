@@ -133,6 +133,23 @@ choice is a judgment about the nine-factor audit rather than a code preference:
 Either way the document and the code should agree, because the document is the thing
 anyone reviewing the deferral would read first.
 
+> **Resolved, 16 November 2026 — option 2, plus the gate moved out of prose.**
+> `DEFERRED.md` now states what is true and keeps the history of what it used to say.
+> The claim is split: the **writing** half is the gate, and it holds — nothing in either
+> repository creates, resolves or assigns a coverage gap — while the **reading** half is
+> the "record-only coverage view" the deferral already anticipated as the permitted end
+> state, which arrived early and undocumented.
+>
+> Prose is what failed here, so the gate is now `tests/deferral.test.ts` in each
+> repository: no writers anywhere, exactly one named reader in the public platform, none
+> at all in the console, seven Today buckets rather than eight, and the document itself
+> checked against the code it describes. Six sabotages verified.
+>
+> One thing went to `COUNSEL.md` as question 16 rather than being decided here: the
+> portal copy reads *"we're arranging cover"*, which is the registry telling a household
+> it coordinates cover. That is a wording question with a § 1812.5095(b)(5) edge, and it
+> is live copy on a screen that is empty only because nothing populates it.
+
 ### 3.4 Features absent by decision, not oversight
 
 Unchanged and still correct: payments and the trust ledger (counsel question 3), ratings
@@ -185,6 +202,20 @@ with the business; `/compliance` grows with credentials.
 The filter UI on `/register` already exists, so this is a page size and a cursor rather
 than a redesign.
 
+> **`/register` done; the rest left alone on purpose.** It is bounded at 150
+> **assignments** — not rows, because a correction belongs under the sheet it corrects
+> and a row limit would eventually cut a chain in half and render a correction with
+> nothing above it to correct, on the one screen where the superseded original is the
+> part an inspector reads. The header says "150 of N" when there is more, and older
+> assignments are reached by the household, nurse and case filters already on the screen.
+>
+> The other seven were not given the same treatment, and that is a decision rather than
+> a stopping point. `/register` grows with every referral **forever**, because
+> § 1812.529 makes the log permanent; `/cases`, `/roster`, `/compliance` and the rest
+> grow with the size of the business and are bounded by it. A caseload of four hundred
+> is a working list an operator wants whole. Revisit when one of them is actually slow,
+> with a number rather than a worry.
+
 ### 4.3 The audit integrity summary runs one query per entity
 
 `lib/queries/audit.ts:348` issues a separate `count(*) … NOT EXISTS` for each of ~27
@@ -228,12 +259,18 @@ vocabulary drift. The gaps that remain:
    assertion should run against a frozen date, and a second pass over a few fixed dates
    (a month boundary, a year boundary, a DST change) would catch the rest of this class
    before the calendar does.
-3. **`CCN-external`: `lib/intakeResponse.ts` has six exports and no test naming it.** The
-   three public intake routes depend on it, and its whole purpose is to be uninformative —
-   "a public form that says *we already have a case for this household* is a disclosure."
-   That property is exactly the kind that regresses silently. `lib/proState.ts` and
-   `lib/profileLimits.ts` are also unmentioned, but both are constants and shapes; this
-   one carries a rule.
+3. ~~**`CCN-external`: `lib/intakeResponse.ts` has six exports and no test naming it.**~~
+   Done — 14 tests, 7 sabotages. The guard that earns its keep is structural: no public
+   intake route may build a `Response` of its own, because each has a `catch` one line
+   away from returning a database error message, and those carry the constraint name,
+   the table, and sometimes the value that collided. `lib/proState.ts` and
+   `lib/profileLimits.ts` are still unmentioned, and both are constants and shapes.
+
+   One thing the tests recorded rather than changed: a tripped honeypot and a real
+   acceptance share a status and `ok: true`, but only the real one carries `reference`,
+   so the bodies are distinguishable by anyone comparing two responses. Closing it means
+   emitting a reference that corresponds to no record, and a fabricated reference is a
+   worse thing for this system to hold than a mild signal is.
 4. ~~**No test asserts the index coverage from §4.1**~~ — `CCN-core/tests/indexes.test.ts`
    now does, against the catalogue, with an empty excuse map.
 5. **No test asserts that `DEFERRED.md` is true.** The claim in §3.3 was prose, so nothing
@@ -268,11 +305,11 @@ Unchanged from `NEXT.md`, restated because it is still what gates the build's va
 1. ~~**Fix the failing test**~~ — done; see the note in §2, which also closed a third
    instance of the UTC-date bug.
 2. ~~**The index migration**~~ — done; core 0024.
-3. **Resolve `coverage_gaps`** — §3.3. Decide, then make the document and the code agree.
-   This is a correctness-of-the-record problem, and it is cheap today.
+3. ~~**Resolve `coverage_gaps`**~~ — done; the document is true and the gate is a test.
+   Question 16 is with counsel.
 4. ~~**Finish the advertising record**~~ — done; core 0025 and `/advertising`.
-5. **Pagination on `/register` and `/cases`** — §4.2, before either table is large rather
-   than after.
+5. ~~**Pagination on `/register`**~~ — done, by assignment. `/cases` and the rest
+   deliberately left; see the note in §4.2.
 6. **Split `actions.ts`** — §4.5, mechanical, and it makes everything after it easier.
 
 Everything above is work this repository can do alone. Nothing in §6 is.
