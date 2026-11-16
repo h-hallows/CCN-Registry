@@ -236,11 +236,12 @@ export default async function RegisterPage({ searchParams }: {
   };
   const filtered = Boolean(filter.caseId || filter.providerId || filter.householdId);
 
-  const [sheets, state, blocked] = await Promise.all([
+  const [page, state, blocked] = await Promise.all([
     register(ctx, filter),
     integrity(ctx),
     blockers(),
   ]);
+  const { sheets } = page;
 
   const logged = state.nursingReferrals - state.unlogged.length;
 
@@ -367,7 +368,17 @@ export default async function RegisterPage({ searchParams }: {
 
       <Section
         title={filtered ? 'The log sheets shown' : 'The log sheets'}
-        blurb="Newest assignment first. A correction reads under the entry it replaces."
+        blurb={page.truncated
+          ? `The ${page.shown} most recent assignments, of ${page.total} in the register. `
+            + 'A correction reads under the entry it replaces. Older assignments are '
+            + 'reached by filtering to the household, the nurse or the case — the '
+            + 'register is permanent, so it is only ever longer than this.'
+          : 'Newest assignment first. A correction reads under the entry it replaces.'}
+        right={page.truncated ? (
+          <span className="nums text-xs" style={{ color: 'var(--ink-faint)' }}>
+            {page.shown} of {page.total}
+          </span>
+        ) : null}
       >
         {sheets.length === 0 ? (
           <Empty>

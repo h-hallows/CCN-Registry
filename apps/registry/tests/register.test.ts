@@ -20,7 +20,7 @@ import { isSkilled } from '@h-hallows/core/domain';
 import { makeReferral, ReferralError } from '@/lib/domain/referral';
 import {
   assignmentBlockersFor, blockers, fileCorrection, fileMissingEntry, integrity, register,
-  RegisterError,
+  REGISTER_LIMIT, RegisterError,
 } from '@/lib/queries/register';
 
 let db: DbHandle;
@@ -65,7 +65,7 @@ describe('the seeded register is a register', () => {
   });
 
   it('reads every sheet back with the facts filled in', async () => {
-    const sheets = await register(TEST_CTX);
+    const { sheets } = await register(TEST_CTX);
     expect(sheets.length).toBeGreaterThan(0);
     for (const s of sheets) {
       expect(s.patientName.trim().length).toBeGreaterThan(1);
@@ -82,7 +82,7 @@ describe('the seeded register is a register', () => {
   });
 
   it('names the household and the nurse, not only their ids', async () => {
-    const sheets = await register(TEST_CTX);
+    const { sheets } = await register(TEST_CTX);
     const sheet = sheets[0]!;
     const expected = await one<{ household: string; nurse: string }>(
       `SELECT h.display_name AS household, p.full_name AS nurse
@@ -233,7 +233,7 @@ describe('a referral it cannot log is refused before the disclosure', () => {
 
 describe('a correction supersedes and never edits', () => {
   it('files a new entry, leaves the original, and marks it superseded', async () => {
-    const sheets = await register(TEST_CTX);
+    const { sheets } = await register(TEST_CTX);
     const original = sheets.find((s) => !s.superseded && s.correctsId === null)!;
     const wasAddress = original.patientAddress;
 
@@ -248,7 +248,7 @@ describe('a correction supersedes and never edits', () => {
       note: 'The apartment number was left off the original entry.',
     });
 
-    const after = await register(TEST_CTX, { caseId: original.caseId });
+    const { sheets: after } = await register(TEST_CTX, { caseId: original.caseId });
     const before = after.find((s) => s.id === original.id)!;
     const correction = after.find((s) => s.id === correctionId)!;
     expect(before.patientAddress).toBe(wasAddress);
@@ -262,7 +262,7 @@ describe('a correction supersedes and never edits', () => {
   });
 
   it('refuses a correction with nothing to say', async () => {
-    const sheets = await register(TEST_CTX);
+    const { sheets } = await register(TEST_CTX);
     const target = sheets.find((s) => !s.superseded)!;
     await expect(fileCorrection(TEST_CTX, {
       entryId: target.id,
@@ -277,7 +277,7 @@ describe('a correction supersedes and never edits', () => {
   });
 
   it('refuses to correct an entry that has already been corrected', async () => {
-    const sheets = await register(TEST_CTX);
+    const { sheets } = await register(TEST_CTX);
     const superseded = sheets.find((s) => s.superseded);
     expect(superseded, 'the test above should have left one').toBeTruthy();
     await expect(fileCorrection(TEST_CTX, {
@@ -338,7 +338,7 @@ describe('an entry that was never made', () => {
       `UPDATE referrals SET referred_at = now() - interval '40 days' WHERE id = $1`,
       [referralId]).catch(() => undefined);
     const entryId = await fileMissingEntry(TEST_CTX, referralId);
-    const sheets = await register(TEST_CTX);
+    const { sheets } = await register(TEST_CTX);
     const filed = sheets.find((s) => s.id === entryId);
     if (filed) expect(filed.enteredAfterDays).toBeGreaterThanOrEqual(0);
 
@@ -404,10 +404,118 @@ describe('reading the register is itself a read of patients', () => {
 
   it('puts the entry on the household’s own trail', async () => {
     const { householdTrail } = await import('@/lib/queries/audit');
-    const sheet = (await register(TEST_CTX))[0]!;
+    const sheet = (await register(TEST_CTX)).sheets[0]!;
     const trail = await householdTrail(TEST_CTX, sheet.householdId);
     expect(trail).not.toBeNull();
     expect(trail!.rows.some((r) => r.entityId === sheet.id)).toBe(true);
+  });
+});
+
+describe('the register is bounded without being cut in half', () => {
+  function sourceFiles(dir: string, out: string[] = []): string[] {
+    for (const entry of readdirSync(dir)) {
+      if (entry === 'node_modules' || entry === '.next' || entry.startsWith('.')) continue;
+      const path = join(dir, entry);
+      if (statSync(path).isDirectory()) sourceFiles(path, out);
+      else if (/\.tsx?$/.test(entry)) out.push(path);
+    }
+    return out;
+  }
+
+  /*
+   * § 1812.529 asks for a permanent log, so this is the one screen in the console whose
+   * query has no natural end: every sheet written since the business started is in it,
+   * for good, and an unbounded read got slower every week the console was used.
+   *
+   * The limit is in ASSIGNMENTS, not rows, and that is the whole of the care needed
+   * here. A correction belongs under the sheet it corrects; a row limit would one day
+   * land between them and render a correction with nothing above it to correct — on a
+   * statutory register, where the superseded original is the part an inspector reads.
+   */
+  it('reports what it showed against what it holds', async () => {
+    const page = await register(TEST_CTX);
+    const held = await one<{ n: string }>(
+      `SELECT count(DISTINCT referral_id)::text AS n FROM assignment_log`);
+
+    expect(page.total).toBe(Number(held.n));
+    expect(page.shown).toBeLessThanOrEqual(page.total);
+    expect(page.shown).toBeLessThanOrEqual(REGISTER_LIMIT);
+    expect(page.truncated).toBe(page.total > page.shown);
+  });
+
+  it('counts the limit in assignments, not in rows', async () => {
+    const page = await register(TEST_CTX);
+    const assignments = new Set(page.sheets.map((s) => s.referralId));
+    expect(assignments.size).toBe(page.shown);
+    // More rows than assignments is the normal state once anything is corrected, and it
+    // is the state a row limit would get wrong.
+    expect(page.sheets.length).toBeGreaterThanOrEqual(assignments.size);
+  });
+
+  it('never shows a correction without the entry it corrects', async () => {
+    const page = await register(TEST_CTX);
+    const present = new Set(page.sheets.map((s) => s.id));
+    const orphans = page.sheets
+      .filter((s) => s.correctsId !== null && !present.has(s.correctsId))
+      .map((s) => s.id);
+    expect(orphans, 'a correction chain was cut by the page boundary').toEqual([]);
+  });
+
+  it('says so when it is showing less than the register holds', async () => {
+    const whole = await register(TEST_CTX);
+    expect(whole.truncated).toBe(false);
+    expect(whole.total).toBeGreaterThan(2);
+
+    const cut = await register(TEST_CTX, undefined, 2);
+    expect(cut.shown).toBe(2);
+    expect(cut.total, 'the count must be of the register, not of the page').toBe(whole.total);
+    expect(cut.truncated).toBe(true);
+
+    // And the page is still whole at its own boundary: the two newest assignments, with
+    // every sheet belonging to them and nothing belonging to a third.
+    expect(new Set(cut.sheets.map((s) => s.referralId)).size).toBe(2);
+    const present = new Set(cut.sheets.map((s) => s.id));
+    for (const sheet of cut.sheets) {
+      if (sheet.correctsId !== null) expect(present.has(sheet.correctsId)).toBe(true);
+    }
+  });
+
+  it('is never asked for a smaller page by the console', () => {
+    /*
+     * The limit argument exists so truncation can be tested. A screen that passed one
+     * would show fewer assignments than the register holds while printing `total`
+     * beside them — the register misreporting itself, on the screen that exists to
+     * report it.
+     */
+    const files = sourceFiles(join(import.meta.dirname, '..', 'lib'))
+      .concat(sourceFiles(join(import.meta.dirname, '..', 'app')))
+      // The module that declares it, obviously.
+      .filter((f) => !f.endsWith('lib/queries/register.ts'));
+    const offenders: string[] = [];
+    for (const file of files) {
+      const text = readFileSync(file, 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+      for (const m of text.matchAll(/\bregister\(([^)]*)\)/g)) {
+        const args = m[1]!.split(',').length;
+        if (args > 2) offenders.push(`${file}: register(${m[1]!.trim()})`);
+      }
+    }
+    expect(offenders, offenders.join('\n')).toEqual([]);
+  });
+
+  it('fetches sheets by assignment, which is what keeps a chain whole', () => {
+    /*
+     * Asserted at the source because the behaviour above cannot fail until the register
+     * exceeds the limit, and by then the screen is in use. The sheet query must be keyed
+     * by the assignments already chosen — a LIMIT moved onto it would pass every test in
+     * this file today and cut a chain the first busy year.
+     */
+    const module = readFileSync(
+      join(import.meta.dirname, '..', 'lib/queries/register.ts'), 'utf8');
+    const sheetQuery = module.match(/\$\{SHEET_SELECT\}[\s\S]*?`,/)?.[0];
+    expect(sheetQuery, 'the sheet query moved').toBeDefined();
+    expect(sheetQuery!).toMatch(/referral_id = ANY/);
+    expect(sheetQuery!, 'the sheet query must not carry a row limit').not.toMatch(/LIMIT/);
   });
 });
 

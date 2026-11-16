@@ -159,16 +159,61 @@ function toSheet(r: SheetRow): LogSheet {
 }
 
 /**
+ * How many ASSIGNMENTS the register renders at once.
+ *
+ * Counted in assignments rather than rows because a sheet never travels alone: its
+ * corrections belong under it, and a limit applied to rows would eventually cut a chain
+ * in half and render a correction with nothing above it to correct.
+ *
+ * § 1812.529 asks for a permanent log, so this register only grows and has no natural
+ * end the way a queue does — every sheet written since the business started is in it,
+ * for good. Unbounded, this screen loaded the whole statutory history on every view and
+ * got slower every week it was used. An older assignment is reached by filter: an
+ * inspector asks about a particular household, nurse or case, and all three are already
+ * query parameters on this screen.
+ */
+export const REGISTER_LIMIT = 150;
+
+export interface RegisterPage {
+  sheets: LogSheet[];
+  /** Assignments shown. Never more than REGISTER_LIMIT. */
+  shown: number;
+  /** Assignments the filter matches in all. */
+  total: number;
+  /** True where older assignments exist that this page does not show. */
+  truncated: boolean;
+}
+
+/**
  * The register, newest assignment first, corrections following the sheet they correct.
  *
  * Ordered by the referral the sheets belong to rather than by `created_at`, so a
  * correction filed months later reads under its original instead of at the top of the
  * register as if it were a new assignment.
+ *
+ * Two statements rather than one. The first picks the assignments, the second fetches
+ * every sheet belonging to them; a single query with a LIMIT would be a row limit, and
+ * the register's unit is the assignment.
  */
 export async function register(
   ctx: AuditContext,
   filter?: { caseId?: string; providerId?: string; householdId?: string },
-): Promise<LogSheet[]> {
+  /*
+   * A smaller page than REGISTER_LIMIT, never a larger one.
+   *
+   * It exists so truncation is testable. Without it, `truncated` cannot be made true
+   * against a seeded database — seven assignments against a limit of a hundred and
+   * fifty — so the flag would be asserted only in the state where it is false, which is
+   * how the capacity measure came to ship with two definitions of one word. A guard
+   * nobody can make fire is a guard nobody has checked.
+   *
+   * The console never passes it, and `tests/register.test.ts` fails if a call site under
+   * `app/` or `lib/` ever does: a screen quietly showing fewer assignments than the
+   * register holds, with the count beside it still reading from `total`, would be the
+   * register misreporting itself.
+   */
+  limit?: number,
+): Promise<RegisterPage> {
   const db = await getDb();
   const where: string[] = [];
   const params: unknown[] = [];
@@ -179,24 +224,55 @@ export async function register(
   if (filter?.householdId) {
     params.push(filter.householdId); where.push(`c.household_id = $${params.length}`);
   }
+  const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-  const rows = await db.query<SheetRow>(
+  const [totals] = await db.query<{ n: string }>(
+    `SELECT count(DISTINCT a.referral_id)::text AS n
+       FROM assignment_log a
+       JOIN cases c ON c.id = a.case_id
+       ${clause}`,
+    params,
+  );
+  const total = Number(totals!.n);
+
+  const wanted = await db.query<{ referral_id: string }>(
+    `SELECT a.referral_id
+       FROM assignment_log a
+       JOIN referrals r ON r.id = a.referral_id
+       JOIN cases c     ON c.id = a.case_id
+       ${clause}
+      GROUP BY a.referral_id, r.referred_at
+      ORDER BY r.referred_at DESC
+      LIMIT ${Math.max(1, Math.min(limit ?? REGISTER_LIMIT, REGISTER_LIMIT))}`,
+    params,
+  );
+
+  const ids = wanted.map((r) => r.referral_id);
+  const rows = ids.length === 0 ? [] : await db.query<SheetRow>(
     `${SHEET_SELECT}
-      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      WHERE a.referral_id = ANY($1::uuid[])
       ORDER BY r.referred_at DESC, a.referral_id,
                a.corrects_id NULLS FIRST, a.created_at`,
-    params,
+    [ids],
   );
 
   await auditRead(ctx, 'assignment', null, {
     read: 'the assignment register',
     section: 'Civil Code § 1812.529',
     entries: rows.length,
+    assignments: ids.length,
+    ofTotal: total,
     ...(filter?.caseId ? { caseId: filter.caseId } : {}),
     ...(filter?.providerId ? { providerId: filter.providerId } : {}),
     ...(filter?.householdId ? { householdId: filter.householdId } : {}),
   });
-  return rows.map(toSheet);
+
+  return {
+    sheets: rows.map(toSheet),
+    shown: ids.length,
+    total,
+    truncated: total > ids.length,
+  };
 }
 
 /**
