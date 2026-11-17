@@ -1,6 +1,7 @@
 /** § 5 Today screen ordering, and the seven-bucket shape. */
 import { describe, expect, it } from 'vitest';
 import { buildToday, dueWording, type TodayInput } from '@/lib/domain/buckets';
+import type { CareType } from '@h-hallows/core/schema';
 
 const TODAY = new Date('2026-10-24T17:00:00.000Z');
 
@@ -91,5 +92,73 @@ describe('due wording', () => {
     expect(dueWording('2026-10-29', TODAY)).toBe('due in 5 days');
     expect(dueWording('2026-10-21', TODAY)).toBe('3 days overdue');
     expect(dueWording('2026-10-23', TODAY)).toBe('1 day overdue');
+  });
+});
+
+describe('the ending-soon window is measured in California', () => {
+  /*
+   * The only date decision in this module, and the one class of bug this project has
+   * shipped three times: a window measured from the server's date instead of the
+   * operator's. V1-REVIEW § 2 records two, `capacity()` was the third this month.
+   *
+   * The instant below is 17:30 on New Year's Eve in Los Angeles, which is 01:30 on New
+   * Year's Day in UTC. Decided in UTC, "today" is the 1st, every engagement ending on
+   * the 31st is a day in the past, and they all drop off the screen — at half past five
+   * in the evening, on the day they end, which is the last moment anybody could do
+   * something about them.
+   *
+   * The existing fixed date in this file is 10:00 Pacific, when the two agree. That is
+   * the time of day a test gets written and the time of day a bug like this hides.
+   */
+  const NEW_YEARS_EVE_EVENING = new Date('2027-01-01T01:30:00.000Z');
+
+  const ending = (endsOn: string) => ({
+    caseId: `case-${endsOn}`,
+    householdName: `Household ${endsOn}`,
+    care: 'personal_care' as CareType,
+    endsOn,
+    primaryProviderName: 'Alma Reyes',
+  });
+
+  function window(endsOn: string[]): string[] {
+    return buildToday(
+      { ...empty, endingSoon: endsOn.map(ending) },
+      NEW_YEARS_EVE_EVENING,
+    ).endingSoon.rows.map((r) => r.endsOn);
+  }
+
+  it('keeps an engagement ending tonight, California time', () => {
+    expect(window(['2026-12-31'])).toEqual(['2026-12-31']);
+  });
+
+  it('keeps the fourteenth day and drops the fifteenth', () => {
+    expect(window(['2027-01-14', '2027-01-15'])).toEqual(['2027-01-14']);
+  });
+
+  it('drops one that ended yesterday', () => {
+    expect(window(['2026-12-30'])).toEqual([]);
+  });
+
+  it('counts the window across a year boundary without losing a day', () => {
+    const all = [
+      '2026-12-30', '2026-12-31', '2027-01-01', '2027-01-07',
+      '2027-01-14', '2027-01-15',
+    ];
+    // Fifteen days inclusive, from today to today + 14, and nothing outside them.
+    expect(window(all)).toEqual(['2026-12-31', '2027-01-01', '2027-01-07', '2027-01-14']);
+  });
+
+  it('counts the window across a leap day too', () => {
+    const leapEvening = new Date('2028-02-29T01:30:00.000Z'); // 17:30 on the 28th, LA
+    const rows = buildToday(
+      {
+        ...empty,
+        endingSoon: ['2028-02-28', '2028-02-29', '2028-03-13', '2028-03-14']
+          .map(ending),
+      },
+      leapEvening,
+    ).endingSoon.rows.map((r) => r.endsOn);
+    // 28 Feb + 14 = 13 Mar in a leap year, and 14 Mar is outside it.
+    expect(rows).toEqual(['2028-02-28', '2028-02-29', '2028-03-13']);
   });
 });
