@@ -100,11 +100,21 @@ Measured across all three repositories' `app/`, `lib/`, `components/`, `content/
 
 - **`testimonials`** — touched by nothing at all. Not the seed, not either app. Blocked on
   the consent it requires, and migration 0014 already guards the withdrawn-consent case.
-- **`rate_ranges`** — read by `CCN-external/lib/rates.ts` and the crossed landing pages,
-  **written by no operator screen.** The public site's price bands come from a table the
-  operator cannot edit. Under § 1812.533(b)(1) a published band that has drifted from
-  reality is a misleading-advertising problem, so this one has a legal edge, not just a
-  content one.
+- ~~**`rate_ranges`**~~ — **built: core 0026 and `/rates`.** The public site's price bands
+  came from a table no operator screen could write, which under § 1812.533(b)(1) is a
+  legal edge rather than a content one. The table is now append-only and records who
+  posted each band and when; the console shows what the roster actually charges at that
+  credential level beside the field, and says what it notices about the band being
+  posted without refusing it.
+
+  The screen earned its place on the first load: **14 of 14 live bands were authored by
+  the seed**, and the roster's certified nursing assistants charge $34–36 against a
+  published overnight-newborn band of $48–65. That is the drift the section is about,
+  and it was invisible from inside the console because the console never showed it.
+
+  Nothing derives a band from the roster, and a test fails if the band fields ever gain
+  a `defaultValue` — I5, and a console that proposed a price would be the registry
+  setting one with extra steps.
 - **`operator_notifications`** — written by `CCN-external/lib/notify.ts`, read by nothing.
   Superseded by `/intake`, `/requests`, `/submissions`, `/applications`, which are better
   than one undifferentiated inbox. Needs a decision, not a screen: either read it or drop
@@ -349,5 +359,19 @@ Unchanged from `NEXT.md`, restated because it is still what gates the build's va
 
 Items 1–5 are done. What is left on this list is item 6 and the retention policy behind
 §4.3 and §4.4, which is counsel's question 15 rather than a code task.
+
+## 8. Added after this list was written
+
+- **The clock rule** (core v0.1.29). `current_date` on a managed Postgres is UTC, and
+  nothing sets a connection TimeZone, so a date taken from the server is wrong from four
+  in the afternoon Pacific until midnight. It had shipped three times and been caught a
+  fourth, every time by reading. `src/testing/sqlClock.ts` refuses the six spellings and
+  passes the two correct ones, and each repository sweeps itself — including all 26
+  migrations, where a date decided wrongly in a trigger is decided wrongly for every
+  caller at once. Five sabotages.
+- **`rate_ranges`** — see §3.2.
+
+Still written and never read: `operator_notifications` (a decision, not a screen) and
+`testimonials` (blocked on the consent it requires).
 
 Everything above is work this repository can do alone. Nothing in §6 is.

@@ -52,6 +52,7 @@ import { fileCorrection, fileMissingEntry, RegisterError } from '@/lib/queries/r
 import {
   AdvertisingError, correctEntry, recordAdvertisement, withdrawAdvertisement,
 } from '@/lib/queries/advertising';
+import { postBand, RateBandError } from '@/lib/queries/rates';
 
 const uuid = z.string().uuid();
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected a date');
@@ -87,6 +88,7 @@ function messageOf(err: unknown): string {
   if (err instanceof MeasureError) return err.message;
   if (err instanceof RegisterError) return err.message;
   if (err instanceof AdvertisingError) return err.message;
+  if (err instanceof RateBandError) return err.message;
   if (err instanceof z.ZodError) return err.issues[0]?.message ?? 'Check the form.';
   if (err instanceof Error) return err.message;
   return 'Something went wrong.';
@@ -1388,6 +1390,68 @@ export async function correctAdvertisementAction(
 
     revalidatePath('/advertising');
     return { ok: 'Correction filed. The entry it replaces stays in the record.' };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+
+/**
+ * § 1812.533(b)(1) — publish a rate band.
+ *
+ * The numbers are validated for shape here and for truthfulness in `postBand`, which
+ * refuses only what cannot be true and returns the rest as notes. A band that sits
+ * outside what the roster charges is posted with a warning, not refused: the observation
+ * is by credential level and the band is by service, and refusing on that gap would be
+ * the system claiming knowledge it does not have.
+ */
+export async function postRateBandAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const money = z.coerce.number()
+      .positive('A rate has to be more than nothing.')
+      .max(1000, 'That looks like a typo rather than an hourly rate.');
+
+    const parsed = z.object({
+      serviceKey: z.string().trim().min(2, 'Choose a service.'),
+      level: z.string().trim().min(2, 'Choose a credential level.'),
+      low: money,
+      high: money,
+      effectiveFrom: isoDate,
+      note: z.string().trim(),
+    }).parse({
+      serviceKey: form.get('serviceKey'),
+      level: form.get('level'),
+      low: form.get('low'),
+      high: form.get('high'),
+      effectiveFrom: form.get('effectiveFrom'),
+      note: form.get('note') ?? '',
+    });
+
+    const posted = await postBand(ctx, {
+      serviceKey: parsed.serviceKey,
+      level: parsed.level,
+      low: parsed.low,
+      high: parsed.high,
+      effectiveFrom: parsed.effectiveFrom,
+      note: parsed.note || null,
+    });
+
+    revalidatePath('/rates');
+    /*
+     * The warnings come back with the band and are said here. They do not stop the post
+     * — the observation is by credential level and the band is by service — but an
+     * operator who publishes a number to the public is entitled to read what the system
+     * noticed about it, at the moment it happened rather than in the audit log later.
+     */
+    if (posted.notes.length > 0) {
+      return {
+        ok: `Posted, and worth knowing: ${posted.notes.map((n) => n.message).join(' ')}`,
+      };
+    }
+    return { ok: 'Posted. The public pages read this table directly.' };
   } catch (err) {
     return fail(messageOf(err));
   }
