@@ -229,6 +229,22 @@ sequential scans on one page load.
 Cheapest fix that keeps the shape: bound each count to a window, or materialise the
 summary and recompute it on demand rather than on render.
 
+> **Wrong, and corrected by measuring it.** I wrote that from reading the code. `EXPLAIN
+> ANALYZE` against the dev database says otherwise: each count is a **Bitmap Index Scan
+> on `audit_log_entity_idx`** for that entity, then a hash anti-join against the target
+> table. There is no sequential scan of `audit_log` in it, and the index that supports it
+> has existed since migration 0001.
+>
+> What *does* scale linearly with the log, on every `/audit` load, is the pair of
+> unfiltered aggregates above the loop — `count(*)` with its filters, and the `GROUP BY
+> entity`. Two full scans of an append-only table that grows by a row per page view.
+> They are correct and the summary is meant to be over the whole log, so bounding them
+> would make the screen lie about its own completeness. The lever is retention, which is
+> already open as counsel question 15 — not a query rewrite.
+>
+> No change made. The lesson is the one in §2: a claim about performance made from
+> reading source is a guess, and this one was wrong in both directions at once.
+
 ### 4.4 Twenty pages are `force-dynamic` and each one writes on read
 
 Correct for a compliance console — § 3.8 wants to know who looked, and a cached page is a
@@ -254,11 +270,21 @@ vocabulary drift. The gaps that remain:
 
 1. **The failing capacity test asserts something that is not always true.** Fix it so it
    holds on every calendar date. The current version was a time bomb and it just went off.
-2. **No test fixes the date.** The registry suite seeds relative to `now()`, which is how
-   §1 found the capacity defect — by accident, on the right day. Any date-sensitive
-   assertion should run against a frozen date, and a second pass over a few fixed dates
-   (a month boundary, a year boundary, a DST change) would catch the rest of this class
-   before the calendar does.
+2. ~~**No test fixes the date.**~~ Done, where it can be. `src/domain/dates.ts` is the
+   module every expiry, every business-day count and every "is this in force yet"
+   resolves through, and it had **no test file of its own** — it was checked through two
+   callers, on whatever day the suite happened to run. `CCN-core/tests/dateBoundaries.test.ts`
+   now drives it at the awkward instants: an evening in California that is already
+   tomorrow in UTC, both DST transitions, a year boundary, a leap day, and a `date`
+   column arriving as a `Date`. `buckets.test.ts` drives the Today screen's only date
+   decision at 17:30 on New Year's Eve — decided in UTC, every engagement ending that
+   day drops off the screen at half past five on the day it ends. Six sabotages.
+
+   What cannot be frozen is SQL. `now() AT TIME ZONE 'America/Los_Angeles'` reads the
+   database's clock, not the process's, so faking the system time moves the seed and not
+   the queries. The protection there is the source-level assertion added with the
+   capacity fix: `current_date` may not appear in `measure.ts`. The same guard is worth
+   extending to the other modules that decide a date in SQL.
 3. ~~**`CCN-external`: `lib/intakeResponse.ts` has six exports and no test naming it.**~~
    Done — 14 tests, 7 sabotages. The guard that earns its keep is structural: no public
    intake route may build a `Response` of its own, because each has a `catch` one line
@@ -276,9 +302,18 @@ vocabulary drift. The gaps that remain:
 5. **No test asserts that `DEFERRED.md` is true.** The claim in §3.3 was prose, so nothing
    checked it. The banned-table test already proves tables stay untouched; pointing it at
    the deferral list would have caught this the day it was written.
-6. **Nothing exercises either app against a cold, empty database.** Every suite seeds
-   first. The 503 from both `/api/health` endpoints is the one piece of evidence that the
-   no-database path works at all, and it is not asserted anywhere.
+6. ~~**Nothing exercises either app against a cold, empty database.**~~
+   `CCN-Registry/apps/registry/tests/emptyDatabase.test.ts` drives every list and summary
+   the console renders against a database that has been migrated and nothing else —
+   which is exactly the state of the Vercel deployment the moment a Postgres is attached
+   to it.
+
+   **Nothing broke**, which was not the expected result. The hazards are real ones — an
+   aggregate over no rows returns a row holding null, `LIMIT 1` returns none, a
+   percentage divides by zero, `Math.max(...[])` is `-Infinity` — and every one of them
+   was already handled. The test earns its place as the guard for day one rather than as
+   a bug report. The page components were read for the same patterns by hand; the three
+   that looked risky are each guarded.
 
 ---
 
@@ -311,5 +346,8 @@ Unchanged from `NEXT.md`, restated because it is still what gates the build's va
 5. ~~**Pagination on `/register`**~~ — done, by assignment. `/cases` and the rest
    deliberately left; see the note in §4.2.
 6. **Split `actions.ts`** — §4.5, mechanical, and it makes everything after it easier.
+
+Items 1–5 are done. What is left on this list is item 6 and the retention policy behind
+§4.3 and §4.4, which is counsel's question 15 rather than a code task.
 
 Everything above is work this repository can do alone. Nothing in §6 is.
