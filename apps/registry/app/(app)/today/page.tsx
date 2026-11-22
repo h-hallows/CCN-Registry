@@ -205,7 +205,13 @@ export default async function TodayPage() {
                       {r.eligibleAlternates} of 2
                     </td>
                     <td className="text-right">
-                      <RowLink href={`/match/${r.caseId}`}>Build a shortlist</RowLink>
+                      {/*
+                        * Straight to the control. This said "Build a shortlist" and
+                        * went to the top of /match, where saving a shortlist writes a
+                        * timeline note and moves this count by nothing — the column it
+                        * counts had no writer anywhere in the console.
+                        */}
+                      <RowLink href={`/match/${r.caseId}#cover`}>Record an alternate</RowLink>
                     </td>
                   </tr>
                 ))}

@@ -53,6 +53,8 @@ import {
   AdvertisingError, correctEntry, recordAdvertisement, withdrawAdvertisement,
 } from '@/lib/queries/advertising';
 import { postBand, RateBandError } from '@/lib/queries/rates';
+import { AlternateError, recordAlternates } from '@/lib/queries/alternates';
+import { THIN_BENCH_TARGET } from '@/lib/domain/buckets';
 import {
   recordCaseTerms, recordHouseholdFacts, StatutoryFactsError,
 } from '@/lib/queries/statutoryFacts';
@@ -93,6 +95,7 @@ function messageOf(err: unknown): string {
   if (err instanceof AdvertisingError) return err.message;
   if (err instanceof RateBandError) return err.message;
   if (err instanceof StatutoryFactsError) return err.message;
+  if (err instanceof AlternateError) return err.message;
   if (err instanceof z.ZodError) return err.issues[0]?.message ?? 'Check the form.';
   if (err instanceof Error) return err.message;
   return 'Something went wrong.';
@@ -1573,6 +1576,63 @@ export async function recordCaseTermsAction(
       return { ok: written.notes.map((n) => n.message).join(' ') };
     }
     return { ok: 'Recorded on the case.' };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+/**
+ * Set the alternates on a case to what the match screen's boxes say.
+ *
+ * `getAll` rather than `get`: this is a checkbox list, and `get` would take the first
+ * box and silently discard the rest — a case recorded with one alternate out of two, on
+ * the screen whose whole subject is how thin the bench is.
+ *
+ * An empty submission is a real instruction. Unticking everybody says this case has no
+ * cover, which is a thing an operator may need to record, so it is written rather than
+ * treated as a form that forgot to say anything.
+ */
+export async function recordAlternatesAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const parsed = z.object({
+      caseId: uuid,
+      providerIds: z.array(uuid).max(8, 'That is a shortlist, not a bench.'),
+    }).parse({
+      caseId: form.get('caseId'),
+      providerIds: form.getAll('providerId').map(String).filter(Boolean),
+    });
+
+    const written = await recordAlternates(ctx, parsed.caseId, parsed.providerIds);
+
+    revalidatePath(`/match/${parsed.caseId}`);
+    revalidatePath(`/cases/${parsed.caseId}`);
+    revalidatePath('/today');
+    revalidatePath('/cases');
+
+    if (written.added.length === 0 && written.removed.length === 0) {
+      return { ok: 'Nothing had changed.' };
+    }
+
+    /*
+     * Says which names moved, not just that something did. Every other save on these
+     * screens answers "Recorded on the case." and leaves the operator to go and look —
+     * and this is the one write whose whole purpose is a count somebody is watching on
+     * another screen.
+     */
+    const parts: string[] = [];
+    if (written.added.length > 0) parts.push(`Added ${written.added.join(', ')}`);
+    if (written.removed.length > 0) parts.push(`removed ${written.removed.join(', ')}`);
+    const short = THIN_BENCH_TARGET - written.standing.length;
+    return {
+      ok: `${parts.join(', ')}. ${written.standing.length === 0
+        ? 'This case now has no alternate recorded.'
+        : `Standing as alternates: ${written.standing.join(', ')}.`}${short > 0
+        ? ` Still ${short} short of the target of ${THIN_BENCH_TARGET}.`
+        : ''}`,
+    };
   } catch (err) {
     return fail(messageOf(err));
   }

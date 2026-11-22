@@ -6,9 +6,12 @@ import { shortlistFor } from '@/lib/queries/match';
 import { benchesFor } from '@/lib/queries/bench';
 import { SKILLED_CARE_TYPES } from '@/lib/domain/referral';
 import { assignmentBlockersFor, ASSIGNMENT_FIELDS } from '@/lib/queries/register';
+import { standingAlternates } from '@/lib/queries/alternates';
+import { THIN_BENCH_TARGET } from '@/lib/domain/buckets';
 import { PERMITTED } from '@h-hallows/core/domain';
 import {
-  makeReferralAction, publishBenchAction, saveShortlistAction, withdrawBenchAction,
+  makeReferralAction, publishBenchAction, recordAlternatesAction, saveShortlistAction,
+  withdrawBenchAction,
 } from '@/app/(app)/actions';
 import { ActionForm, Disclose } from '@/components/ActionForm';
 import {
@@ -26,10 +29,11 @@ export default async function MatchCasePage({
 
   // The screen and the bench do not depend on each other, and neither depends on the
   // case read beyond it existing — so all three go out together.
-  const [found, shortlist, benches, missingForLog] = await Promise.all([
+  const [found, shortlist, benches, standing, missingForLog] = await Promise.all([
     getCase(ctx, caseId),
     shortlistFor(ctx, caseId, now),
     benchesFor(ctx, caseId),
+    standingAlternates(caseId),
     /*
      * § 1812.529's log sheet is written in the referral transaction and the database
      * refuses the referral without it, so a missing patient address is a missing
@@ -49,6 +53,37 @@ export default async function MatchCasePage({
   const isSkilled = (SKILLED_CARE_TYPES as readonly string[]).includes(kase.care);
   const physicianMissing = isSkilled && !kase.household.physicianName?.trim();
   const alreadyReferred = new Set(found.referrals.map((r) => r.providerId));
+
+  /*
+   * THE COVER FORM'S CANDIDATES. Everyone who clears this case's filters, plus anyone
+   * already standing who no longer does — see `standingAlternates` for why the second
+   * group has to be here. The primary is in neither: the writer refuses a case that
+   * names one person as both, because that case has no cover at all.
+   */
+  const recorded = new Set(standing.map((s) => s.providerId));
+  const coverCandidates = [
+    ...shortlist.eligible
+      .filter((e) => e.providerId !== kase.primaryProviderId)
+      .map((e) => ({
+        providerId: e.providerId,
+        fullName: e.fullName,
+        type: e.type as string,
+        rateHourly: e.rateHourly,
+        clears: true,
+        recorded: recorded.has(e.providerId),
+      })),
+    ...standing
+      .filter((s) => s.providerId !== kase.primaryProviderId)
+      .filter((s) => !shortlist.eligible.some((e) => e.providerId === s.providerId))
+      .map((s) => ({
+        providerId: s.providerId,
+        fullName: s.fullName,
+        type: '—',
+        rateHourly: null as string | null,
+        clears: false,
+        recorded: true,
+      })),
+  ];
 
   return (
     <>
@@ -405,6 +440,83 @@ export default async function MatchCasePage({
               </label>
             </ActionForm>
           </div>
+        )}
+      </Section>
+
+      <Section
+        id="cover"
+        title="Cover"
+        blurb={`Who stands behind the primary if they cannot cover. Recording somebody here does not refer them and does not give a disclosure — it records who this case can fall back on, which is what /today counts when it calls a bench thin.`}
+        right={
+          <span
+            className="nums text-xs"
+            style={{
+              color: standing.length >= THIN_BENCH_TARGET
+                ? 'var(--color-ok)'
+                : 'var(--color-critical)',
+            }}
+          >
+            {standing.length} of {THIN_BENCH_TARGET} recorded
+          </span>
+        }
+      >
+        {coverCandidates.length === 0 ? (
+          <Empty>
+            Nobody clears the filters for this case, so there is no cover to record. The
+            excluded list above gives the reason for each provider — and until one of
+            those reasons changes, this case has no fallback to offer.
+          </Empty>
+        ) : (
+          <ActionForm
+            action={recordAlternatesAction}
+            submitLabel="Record the alternates"
+            className="px-4 py-4"
+          >
+            <input type="hidden" name="caseId" value={kase.id} />
+            <div className="scroller">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Alternate</th><th>Provider</th><th>Type</th><th>Rate</th>
+                    <th>Standing</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {coverCandidates.map((c) => (
+                    <tr key={c.providerId}>
+                      <td>
+                        <input
+                          type="checkbox" name="providerId" value={c.providerId}
+                          defaultChecked={c.recorded}
+                        />
+                      </td>
+                      <td>
+                        <RowLink href={`/roster/${c.providerId}`}>{c.fullName}</RowLink>
+                      </td>
+                      <td style={{ color: 'var(--ink-soft)' }}>{c.type}</td>
+                      <td>{c.rateHourly ? <Rate hourly={c.rateHourly} /> : '—'}</td>
+                      <td
+                        className="text-xs"
+                        style={{
+                          color: c.clears ? 'var(--ink-soft)' : 'var(--color-expired)',
+                        }}
+                      >
+                        {c.clears
+                          ? 'Clears the filters'
+                          : 'Recorded, and no longer clears the filters'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-3 text-xs leading-relaxed" style={{ color: 'var(--ink-faint)' }}>
+              The boxes are the whole list: whoever is ticked when this is saved is who
+              stands, and unticking somebody takes them off the case. A provider already
+              standing who no longer clears the filters is listed so that saving this
+              form does not quietly drop them — untick them only if you mean it.
+            </p>
+          </ActionForm>
         )}
       </Section>
     </>

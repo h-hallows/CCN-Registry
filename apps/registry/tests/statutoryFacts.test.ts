@@ -19,7 +19,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DbHandle } from '@h-hallows/core/db';
 import { caseIdWhere, providerIdByName, seededDb, TEST_CTX } from '@h-hallows/core/testing';
-import { makeReferral, ReferralError } from '@/lib/domain/referral';
+import { makeReferral, ReferralError, SKILLED_CARE_TYPES } from '@/lib/domain/referral';
+import { assignmentMissing } from '@h-hallows/core/domain';
 import {
   postedFeeMaximum, recordCaseTerms, recordHouseholdFacts, StatutoryFactsError,
 } from '@/lib/queries/statutoryFacts';
@@ -436,6 +437,108 @@ describe('it writes only the columns it names', () => {
       physicianFax: h.physician_fax as string | null,
     });
     expect(await auditRows()).toBe(before);
+  });
+});
+
+describe('the badge does not certify a record that is not required', () => {
+  /*
+   * WHAT AN EMPTY LIST MEANS, AND WHAT IT DOES NOT.
+   *
+   * `assignmentMissing` returns nothing missing in TWO different situations: every
+   * statutory field is present, or § 1812.529 does not attach to this case at all. The
+   * first is a complete record. The second is no record, correctly. The badge on the
+   * case screen read the empty list as the first and said "All five on the record" above
+   * an empty ORDERING PHYSICIAN field, on a household panel reading "Not recorded".
+   *
+   * It is worth a test rather than a careful reading because the badge is otherwise
+   * live and right — it counts down as the fields are filled — so an operator learns to
+   * believe it, and a trusted indicator that certifies an absent statutory record is
+   * worse than no indicator. The physician is the field a reader checks it against:
+   * § 1812.524 refuses a skilled referral without one.
+   */
+  const page = readFileSync(
+    join(process.cwd(), 'app/(app)/cases/[caseId]/page.tsx'), 'utf8');
+
+  /*
+   * Comments stripped before anything is located. The explanation beside the badge
+   * quotes its own wording, so a search over the raw source finds the comment first and
+   * the test passes or fails on prose rather than on code.
+   */
+  const factsSection = (): string => {
+    const from = page.indexOf('id="facts"');
+    expect(from, 'the facts section is gone from the case screen').toBeGreaterThan(-1);
+    return page.slice(from, page.indexOf('</Section>', from))
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  };
+
+  it('asks whether the section applies before claiming the record is complete', () => {
+    const section = factsSection();
+    const claim = section.indexOf('All five on the record');
+    const guard = section.indexOf('!isSkilled');
+
+    expect(claim, 'the completeness wording is gone; update this test with it')
+      .toBeGreaterThan(-1);
+    expect(
+      guard,
+      'the badge claims five statutory facts are on the record without first asking '
+      + 'whether § 1812.529 requires any of them',
+    ).toBeGreaterThan(-1);
+    expect(
+      guard,
+      'the completeness claim is reachable before the case is known to be a nursing case',
+    ).toBeLessThan(claim);
+  });
+
+  it('says what it says instead, so the state is not simply blank', () => {
+    // A badge that renders nothing for a third of all cases reads as a broken badge.
+    expect(factsSection()).toContain('No log sheet required');
+  });
+
+  /*
+   * The premise the screen rests on, asserted against the domain rather than the page.
+   * If core ever made the five unconditional, the guard above would start hiding a real
+   * gap instead of a phantom one — and this is the test that would say so.
+   */
+  it('returns nothing missing for care that is not private duty nursing', async () => {
+    const others = await db.query<{ care: string }>(
+      `SELECT DISTINCT care FROM cases WHERE deleted_at IS NULL ORDER BY care`);
+    const nonNursing = others
+      .map((r) => r.care)
+      .filter((care) => !(SKILLED_CARE_TYPES as readonly string[]).includes(care));
+
+    expect(nonNursing.length, 'the fixture has no non-nursing case to check')
+      .toBeGreaterThan(0);
+
+    for (const care of nonNursing) {
+      expect(
+        assignmentMissing({
+          care,
+          patientName: null,
+          patientAddress: null,
+          attendingPhysician: null,
+          startsOn: null,
+          feePct: null,
+        }),
+        `${care} reports missing statutory fields, so the badge's guard now hides them`,
+      ).toEqual([]);
+    }
+  });
+
+  it('still reports every field missing for a nursing case with nothing on it', () => {
+    // The other side of the same contract: the guard must not be doing the work.
+    for (const care of SKILLED_CARE_TYPES as readonly string[]) {
+      expect(
+        assignmentMissing({
+          care,
+          patientName: null,
+          patientAddress: null,
+          attendingPhysician: null,
+          startsOn: null,
+          feePct: null,
+        }).length,
+        `${care} is skilled and reports nothing missing from an empty record`,
+      ).toBe(5);
+    }
   });
 });
 

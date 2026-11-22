@@ -47,8 +47,48 @@ No domain purchased. No wordmark drawn.
 
 ## Owed to core
 
-One migration, deliberately not taken here because it belongs in the database rather than
-in one caller.
+Two migrations, both deliberately not taken here because they belong in the database
+rather than in one caller.
+
+**Every append-only table can be emptied by TRUNCATE, and no guard sees it.** Seven
+tables carry a `deny_mutation()` trigger: `assignment_log`, `audit_log`,
+`credential_events`, `metric_events`, `rate_ranges`, `referrals`, `timeline_entries`.
+Every one of them is declared `BEFORE DELETE OR UPDATE ... FOR EACH ROW`. TRUNCATE is
+neither a DELETE nor an UPDATE and does not fire a row-level trigger at all, so it
+removes every row in the table and nothing raises. Verified against the dev database:
+`BEGIN; TRUNCATE audit_log;` reported 928 rows gone, inside a transaction that was then
+rolled back.
+
+What makes this worth a migration rather than a note is which tables they are.
+`assignment_log` is the § 1812.529 permanent record — the one the statute requires be
+kept, and the one `/register` exists to evidence. `audit_log` is the answer to "who
+looked at this household" under § 3.8, and `/audit` tells the operator in its own words
+that "nothing here is deleted, and nothing can be — the table refuses UPDATE and DELETE
+outright". That sentence is exactly true and reads as a stronger guarantee than it is: a
+reader takes it to mean the record is permanent, and permanence is the property the
+statute is actually asking for.
+
+`deny_mutation()` needs no change — it reads only `TG_OP` and `TG_TABLE_NAME`, both of
+which a statement-level trigger has. TRUNCATE triggers cannot be `FOR EACH ROW`, so each
+one is a second trigger beside the existing one:
+
+```sql
+CREATE TRIGGER trg_audit_no_truncate
+  BEFORE TRUNCATE ON audit_log
+  FOR EACH STATEMENT EXECUTE FUNCTION deny_mutation();
+-- and the same for assignment_log, credential_events, metric_events,
+-- rate_ranges, referrals, timeline_entries.
+```
+
+The test that belongs with it is the one that would have caught this: enumerate every
+table holding a `deny_mutation()` trigger and assert each has BOTH a row-level guard and
+a statement-level TRUNCATE guard, so an eighth append-only table added later cannot ship
+with half of one. Asserting the seven by name would pass while leaving the next table
+open, which is the same shape of mistake as the trigger itself.
+
+Nothing in either application issues a TRUNCATE, so this is not a live breach — it is a
+guarantee the console states in writing and the database does not hold. `db:reset` is the
+one legitimate caller, and it drops the schema rather than truncating.
 
 **A household may not lose its ordering physician under a live private duty nursing
 case.** `assert_physician_for_skilled` fires on a TRANSITION of `cases` — insert, status

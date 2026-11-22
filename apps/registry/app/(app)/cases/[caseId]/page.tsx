@@ -254,8 +254,27 @@ export default async function CasePage({
           without them, by the database as well as by the screen. Nothing on this form
           has a default: a date or a fee the household never agreed to is the false entry
           the section prohibits."
+        /*
+         * THREE STATES, BECAUSE AN EMPTY LIST MEANS TWO DIFFERENT THINGS.
+         *
+         * `assignmentMissing` returns [] for a case that is not skilled, and it is right
+         * to: § 1812.529 attaches to a private duty nursing referral, and a companion
+         * referral has no attending physician to name. This badge read that [] as
+         * success and said "All five on the record" — directly above an empty ORDERING
+         * PHYSICIAN field and a household panel reading "Not recorded". Nothing was on
+         * the record and nothing needed to be.
+         *
+         * The badge is otherwise live and accurate, counting down as the fields are
+         * filled, which is exactly what made the false one worth fixing: an operator
+         * learns to trust it, and then it certifies a statutory record that does not
+         * exist. `isSkilled` is already computed above for the physician banner.
+         */
         right={
-          missingFacts.length === 0 ? (
+          !isSkilled ? (
+            <span className="text-xs" style={{ color: 'var(--ink-faint)' }}>
+              No log sheet required
+            </span>
+          ) : missingFacts.length === 0 ? (
             <span className="text-xs" style={{ color: 'var(--color-ok)' }}>
               All five on the record
             </span>
@@ -266,7 +285,18 @@ export default async function CasePage({
           )
         }
       >
-        {missingFacts.length > 0 ? (
+        {!isSkilled ? (
+          <p
+            className="border-b hair px-4 py-3 text-xs leading-relaxed"
+            style={{ color: 'var(--ink-faint)' }}
+          >
+            The care on this case is not private duty nursing, so § 1812.529 requires no
+            log sheet for it and none of the five fields is refused for being blank. The
+            forms below still record what is known — the physician, where applicable, is
+            also what § 1812.524 asks for before a skilled referral, and the care type on
+            a case can change.
+          </p>
+        ) : missingFacts.length > 0 ? (
           <ul className="border-b hair px-4 py-3 text-xs leading-relaxed">
             {missingFacts.map((f) => {
               const def: { label: string; fix?: string } = ASSIGNMENT_FIELDS[f];
@@ -458,7 +488,8 @@ export default async function CasePage({
                 <tr>
                   <td style={{ color: 'var(--ink-faint)' }}>Alternate</td>
                   <td colSpan={4} style={{ color: 'var(--color-critical)' }}>
-                    None recorded. <RowLink href={`/match/${kase.id}`}>Build a shortlist</RowLink>
+                    None recorded.{' '}
+                    <RowLink href={`/match/${kase.id}#cover`}>Record an alternate</RowLink>
                   </td>
                 </tr>
               ) : null}
