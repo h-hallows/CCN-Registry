@@ -370,6 +370,33 @@ Items 1–5 are done. What is left on this list is item 6 and the retention poli
   migrations, where a date decided wrongly in a trigger is decided wrongly for every
   caller at once. Five sabotages.
 - **`rate_ranges`** — see §3.2.
+- **The facts a referral needs** — the gate was built, green, and could never be passed.
+  `assertCaseReferable` refuses a private duty nursing referral that cannot produce its
+  § 1812.529 log sheet, and three of the five facts it asks for had no writer anywhere in
+  the application: `convertInquiry` is the only INSERT into `households` and names eleven
+  columns, `cr_address` and `physician_name` not among them, and there was no UPDATE of
+  that table at all. So **no referral the console originated could ever be made**, and
+  every surface built around that said so and pointed nowhere — `/match` printed "Open
+  the case to fill them in" above a screen with nothing to fill in, `/register` said
+  "Fill those in on the household and the case first", and `assert_physician_for_skilled`
+  refused the status change every time, correctly, permanently.
+
+  `lib/queries/statutoryFacts.ts` and the section on the case screen are the writer. Two
+  audited actions, named columns only, no field with a default — a start date or a fee
+  the household never agreed to arriving by way of a pre-filled box is the false entry
+  § 1812.529 names, made by the screen rather than by anyone.
+
+  It refuses to take away a fact a record already stands on, and only says — naming the
+  entries — where a correction has put a filed log sheet out of step with the record,
+  because a record that cannot be corrected is a record that has to be wrong forever and
+  `ASSIGNMENT_LOG_CORRECTION` exists for exactly that. Ten sabotages; three of them found
+  assertions that could not reach their case, including two allow-list checks taking
+  their baseline from a row an earlier test had already moved.
+
+  Verified end to end against the Docker Postgres: a hospice support case reading "1 of 5
+  missing" → physician recorded → "All five on the record" → the match screen's refusal
+  gone → referral and disclosure recorded → the sheet in `/register` with the typed
+  physician, and no nursing case left in the blocked list.
 
 Still written and never read: `operator_notifications` (a decision, not a screen) and
 `testimonials` (blocked on the consent it requires).

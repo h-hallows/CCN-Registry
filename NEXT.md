@@ -45,6 +45,25 @@ their feedback lands on the case.
 
 No domain purchased. No wordmark drawn.
 
+## Owed to core
+
+One migration, deliberately not taken here because it belongs in the database rather than
+in one caller.
+
+**A household may not lose its ordering physician under a live private duty nursing
+case.** `assert_physician_for_skilled` fires on a TRANSITION of `cases` — insert, status
+change, care-type change — which is right for the case side: firing on every update would
+permanently lock a legacy skilled case that has no physician, so it could never be edited
+even to add one. The cost is that an UPDATE of `households` is outside its reach, and
+clearing `physician_name` under an already-referred skilled case is a write the database
+accepts. It had never happened because until `statutoryFacts.ts` nothing could write that
+column at all.
+
+`recordHouseholdFacts` refuses it, with a test that proves the database would still allow
+it. That is one caller, and the seed and any hand-run statement are not it. The migration
+is a BEFORE UPDATE guard on `households` raising when `physician_name` goes empty while a
+case on that household is `referred` or `active` and its care type is in `SKILLED`.
+
 `restructure/workspaces` was merged to `main` on 2026-11-06; `main` is the workspace
 layout and the branch is gone. `vercel.json` at the repository root sets the build
 command and output directory, so the deployment does not need a Root Directory set in

@@ -23,22 +23,42 @@ function fieldLabel(field: AssignmentField): string {
   return ASSIGNMENT_FIELDS[field].label.replace(/^The /, '');
 }
 
-/** A statutory field the household record cannot supply, and what to do about it. */
-function Missing({ fields }: { fields: readonly AssignmentField[] }) {
+/**
+ * A statutory field the household record cannot supply, and what to do about it.
+ *
+ * The `fix` strings have always been here. What was not here was anywhere to do them:
+ * no screen in the console could write `cr_address` or `physician_name`, so this list
+ * named a remedy that did not exist and these rows could never clear. The link is to
+ * the form that writes them.
+ */
+function Missing({
+  fields, caseId,
+}: { fields: readonly AssignmentField[]; caseId?: string }) {
   return (
-    <ul className="space-y-1">
-      {fields.map((f) => {
-        const def: { label: string; fix?: string } = ASSIGNMENT_FIELDS[f];
-        return (
-          <li key={f} className="text-xs leading-snug">
-            <span style={{ color: 'var(--color-expired)' }}>{fieldLabel(f)}</span>
-            {def.fix ? (
-              <span style={{ color: 'var(--ink-faint)' }}> — {def.fix}</span>
-            ) : null}
-          </li>
-        );
-      })}
-    </ul>
+    <>
+      <ul className="space-y-1">
+        {fields.map((f) => {
+          const def: { label: string; fix?: string } = ASSIGNMENT_FIELDS[f];
+          return (
+            <li key={f} className="text-xs leading-snug">
+              <span style={{ color: 'var(--color-expired)' }}>{fieldLabel(f)}</span>
+              {def.fix ? (
+                <span style={{ color: 'var(--ink-faint)' }}> — {def.fix}</span>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      {caseId ? (
+        <Link
+          href={`/cases/${caseId}#facts`}
+          className="mt-1 inline-block text-xs underline underline-offset-4"
+          style={{ color: 'var(--accent)' }}
+        >
+          Record them on the case
+        </Link>
+      ) : null}
+    </>
   );
 }
 
@@ -204,7 +224,7 @@ function Gap({ row }: { row: Unlogged }) {
           <p className="mb-1 text-xs" style={{ color: 'var(--ink-soft)' }}>
             The household record cannot supply this entry yet:
           </p>
-          <Missing fields={row.missing} />
+          <Missing fields={row.missing} caseId={row.caseId} />
         </div>
       )}
     </div>
@@ -219,7 +239,9 @@ function BlockedCase({ row }: { row: Blocker }) {
       </td>
       <td className="px-4 py-2 text-sm">{careLabel(row.care)}</td>
       <td className="px-4 py-2 text-sm" style={{ color: 'var(--ink-faint)' }}>{row.status}</td>
-      <td className="px-4 py-2"><Missing fields={row.missing} /></td>
+      <td className="px-4 py-2">
+        <Missing fields={row.missing} caseId={row.caseId} />
+      </td>
     </tr>
   );
 }

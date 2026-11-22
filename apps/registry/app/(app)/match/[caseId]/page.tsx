@@ -90,8 +90,10 @@ export default async function MatchCasePage({
             })}
           </ul>
           <p className="mt-2">
-            <Link href={`/cases/${caseId}`} className="underline">Open the case</Link>
-            {' to fill them in. '}
+            <Link href={`/cases/${caseId}#facts`} className="underline">
+              Open the case
+            </Link>
+            {' to fill them in — the form is under “The facts a referral needs”. '}
             {physicianMissing
               ? 'The physician is required twice over: § 1812.524 and I11 refuse a '
                 + 'skilled referral without one, whatever the log sheet needs.'

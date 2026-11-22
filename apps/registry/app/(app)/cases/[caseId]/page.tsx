@@ -13,14 +13,18 @@ import {
 import { Documents } from '@/components/Documents';
 import { PortalAccess } from '@/components/PortalAccess';
 import { dueWording, URGENCY_LABEL } from '@/lib/domain/buckets';
-import { civilLA, formatISODate } from '@h-hallows/core/domain';
+import {
+  ASSIGNMENT_FIELDS, assignmentMissing, civilLA, formatISODate,
+} from '@h-hallows/core/domain';
 import { SKILLED_CARE_TYPES } from '@/lib/domain/referral';
 import {
   addNoteAction, endEngagementAction, logCallAction, markWrittenSentAction,
-  recordConsentAction, recordMonthHoursAction, recordReferralOutcomeAction,
-  recordServiceFailureAction, revokeConsentAction, withdrawBenchAction,
+  recordCaseTermsAction, recordConsentAction, recordHouseholdFactsAction,
+  recordMonthHoursAction, recordReferralOutcomeAction, recordServiceFailureAction,
+  revokeConsentAction, withdrawBenchAction,
 } from '@/app/(app)/actions';
 import { measureForCase } from '@/lib/queries/measure';
+import { postedFeeMaximum } from '@/lib/queries/statutoryFacts';
 import { currentMonthISO, SERVICE_FAILURE_KINDS, SERVICE_FAILURE_LABEL } from '@/lib/metrics';
 import { ActionForm, Disclose } from '@/components/ActionForm';
 import { CopyBox } from '@/components/CopyBox';
@@ -52,12 +56,28 @@ export default async function CasePage({
   const physicianMissing = isSkilled && !h.physicianName?.trim();
 
   /*
+   * The § 1812.529 facts this record still cannot supply, from the same list the
+   * referral transaction refuses on and the match screen reports. Three of them live on
+   * the household and two on the case, which is why the section that writes them is one
+   * section with two forms rather than a field buried in each.
+   */
+  const missingFacts = assignmentMissing({
+    care: kase.care,
+    patientName: h.crName,
+    patientAddress: h.crAddress,
+    attendingPhysician: h.physicianName,
+    startsOn: kase.startsOn,
+    feePct: kase.feePct,
+  });
+
+  /*
    * Six independent reads. They ran one after another, which on this screen — the
    * densest in the console — meant the page could not start rendering until the last
    * of six serial round trips came back. Nothing below depends on anything else below.
    */
-  const [benches, feedback, portalUsers, consents, docs, measure, primary, alternates]
-    = await Promise.all([
+  const [
+    benches, feedback, portalUsers, consents, docs, measure, primary, alternates, feeMax,
+  ] = await Promise.all([
     benchesFor(ctx, caseId),
     feedbackForCase(ctx, caseId),
     portalUsersFor(ctx, 'household', h.id),
@@ -70,6 +90,7 @@ export default async function CasePage({
     Promise.all(
       kase.alternateProviderIds.map((id) => getProviderWithStanding(ctx, id, now)),
     ),
+    postedFeeMaximum(),
   ]);
   const liveBench = benches.find((b) => !b.withdrawnAt) ?? null;
   const pastBenches = benches.filter((b) => b.withdrawnAt);
@@ -100,7 +121,10 @@ export default async function CasePage({
         <Banner tone="alert" title="No ordering physician on the household record">
           This is a skilled case. Under Civil Code § 1812.524 it cannot reach referred
           status until an ordering physician is recorded. The database refuses the status
-          change, so this is not advisory.
+          change, so this is not advisory.{' '}
+          <Link href={`/cases/${kase.id}#facts`} className="underline underline-offset-4">
+            Record it below
+          </Link>.
         </Banner>
       ) : null}
 
@@ -209,6 +233,163 @@ export default async function CasePage({
           <Field label="Stated needs">
             {kase.adlNeeds.map((a) => a.replace(/_/g, ' ')).join(', ') || '—'}
           </Field>
+        </div>
+      </Section>
+
+      {/*
+        * The writer for the five facts Civil Code § 1812.529 requires a log sheet to
+        * state. Three are on the household, two on the case, and until now none of the
+        * five had a writer anywhere in the application: `convertInquiry` is the only
+        * INSERT into `households` and it names eleven columns, `cr_address` and
+        * `physician_name` not among them, and no UPDATE of that table existed. So the
+        * match screen printed "Open the case to fill them in" and this screen had
+        * nothing to fill them in with. This is that screen.
+        */}
+      <Section
+        id="facts"
+        title="The facts a referral needs"
+        blurb="Civil Code § 1812.529 requires a permanent log sheet for every
+          private duty nursing referral, stating who the patient is, where they live,
+          the ordering physician, when service begins and the fee charged. It is refused
+          without them, by the database as well as by the screen. Nothing on this form
+          has a default: a date or a fee the household never agreed to is the false entry
+          the section prohibits."
+        right={
+          missingFacts.length === 0 ? (
+            <span className="text-xs" style={{ color: 'var(--color-ok)' }}>
+              All five on the record
+            </span>
+          ) : (
+            <span className="nums text-xs" style={{ color: 'var(--color-expired)' }}>
+              {missingFacts.length} of 5 missing
+            </span>
+          )
+        }
+      >
+        {missingFacts.length > 0 ? (
+          <ul className="border-b hair px-4 py-3 text-xs leading-relaxed">
+            {missingFacts.map((f) => {
+              const def: { label: string; fix?: string } = ASSIGNMENT_FIELDS[f];
+              return (
+                <li key={f} className="flex flex-wrap gap-x-2">
+                  <span style={{ color: 'var(--color-expired)' }}>
+                    {def.label.replace(/^The /, 'The ')}
+                  </span>
+                  {def.fix ? (
+                    <span style={{ color: 'var(--ink-faint)' }}>{def.fix}</span>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+
+        <div className="border-b hair px-4 py-4">
+          <h3 className="mb-0.5 text-xs font-semibold">On the household</h3>
+          <p className="mb-3 text-xs leading-relaxed" style={{ color: 'var(--ink-faint)' }}>
+            The patient, the address care is given at, and the physician who ordered it.
+            A name the register has already stated cannot be emptied here — only
+            corrected, and the register has its own way of following a correction.
+          </p>
+          <ActionForm action={recordHouseholdFactsAction} submitLabel="Record on the household">
+            <input type="hidden" name="householdId" value={h.id} />
+            <input type="hidden" name="caseId" value={kase.id} />
+            <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+              <label className="block">
+                <span className="label">Care recipient</span>
+                <input type="text" name="crName" className="input mt-1"
+                  defaultValue={h.crName ?? ''} autoComplete="off" />
+              </label>
+              <label className="block">
+                <span className="label">Their age</span>
+                <input type="number" name="crAge" min="0" max="120" className="input mt-1"
+                  defaultValue={h.crAge ?? ''} />
+              </label>
+              <label className="block lg:col-span-1">
+                <span className="label">Address care is given at</span>
+                <input type="text" name="crAddress" className="input mt-1"
+                  defaultValue={h.crAddress ?? ''} autoComplete="off" />
+              </label>
+              <label className="block sm:col-span-2 lg:col-span-3">
+                <span className="label">Getting in — gate, parking, who is there</span>
+                <input type="text" name="crAccessNotes" className="input mt-1"
+                  defaultValue={h.crAccessNotes ?? ''} autoComplete="off" />
+              </label>
+              <label className="block">
+                <span className="label">Ordering physician</span>
+                <input type="text" name="physicianName" className="input mt-1"
+                  defaultValue={h.physicianName ?? ''} autoComplete="off" />
+              </label>
+              <label className="block">
+                <span className="label">Their practice</span>
+                <input type="text" name="physicianPractice" className="input mt-1"
+                  defaultValue={h.physicianPractice ?? ''} autoComplete="off" />
+              </label>
+              <label className="block">
+                <span className="label">Their phone</span>
+                <input type="text" name="physicianPhone" className="input mt-1"
+                  defaultValue={h.physicianPhone ?? ''} autoComplete="off" />
+              </label>
+              <label className="block">
+                <span className="label">Their fax</span>
+                <input type="text" name="physicianFax" className="input mt-1"
+                  defaultValue={h.physicianFax ?? ''} autoComplete="off" />
+              </label>
+            </div>
+          </ActionForm>
+        </div>
+
+        <div className="px-4 py-4">
+          <h3 className="mb-0.5 text-xs font-semibold">On the case</h3>
+          <p className="mb-3 text-xs leading-relaxed" style={{ color: 'var(--ink-faint)' }}>
+            When service begins, and the fee. An open end date is the normal kind and is
+            left empty — the log sheet states one where the household gave one, and
+            ending an engagement is its own record.
+          </p>
+          <ActionForm action={recordCaseTermsAction} submitLabel="Record on the case">
+            <input type="hidden" name="caseId" value={kase.id} />
+            <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+              <label className="block">
+                <span className="label">Service begins</span>
+                <input type="date" name="startsOn" className="input mt-1"
+                  defaultValue={kase.startsOn ?? ''} />
+              </label>
+              <label className="block">
+                <span className="label">Service ends, if they gave a date</span>
+                <input type="date" name="endsOn" className="input mt-1"
+                  defaultValue={kase.endsOn ?? ''} />
+              </label>
+              <label className="block">
+                <span className="label">Hours per week</span>
+                <input type="number" name="hoursPerWeek" min="1" max="168"
+                  className="input mt-1" defaultValue={kase.hoursPerWeek ?? ''} />
+              </label>
+              <label className="block">
+                <span className="label">Referral fee, % of job cost</span>
+                <input type="number" name="feePct" min="0.1" max="100" step="0.1"
+                  className="input mt-1"
+                  defaultValue={kase.feePct ? Number(kase.feePct) : ''} />
+                <span className="mt-0.5 block text-xs" style={{ color: 'var(--ink-faint)' }}>
+                  {feeMax
+                    ? `The posted schedule, version ${feeMax.version}, states a maximum of `
+                      + `${feeMax.maxFeePct}%. Charged to the household, never deducted `
+                      + 'from what the provider earns.'
+                    : 'No fee schedule is posted. Charged to the household, never deducted '
+                      + 'from what the provider earns.'}
+                </span>
+              </label>
+              <label className="block">
+                <span className="label">Hourly rate agreed</span>
+                <input type="number" name="rateAgreed" min="1" max="1000" step="0.5"
+                  className="input mt-1"
+                  defaultValue={kase.rateAgreed ? Number(kase.rateAgreed) : ''} />
+                <span className="mt-0.5 block text-xs" style={{ color: 'var(--ink-faint)' }}>
+                  What the household and the provider settled on, recorded after the fact.
+                  Nothing here proposes it.
+                </span>
+              </label>
+            </div>
+          </ActionForm>
         </div>
       </Section>
 

@@ -53,6 +53,9 @@ import {
   AdvertisingError, correctEntry, recordAdvertisement, withdrawAdvertisement,
 } from '@/lib/queries/advertising';
 import { postBand, RateBandError } from '@/lib/queries/rates';
+import {
+  recordCaseTerms, recordHouseholdFacts, StatutoryFactsError,
+} from '@/lib/queries/statutoryFacts';
 
 const uuid = z.string().uuid();
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected a date');
@@ -89,6 +92,7 @@ function messageOf(err: unknown): string {
   if (err instanceof RegisterError) return err.message;
   if (err instanceof AdvertisingError) return err.message;
   if (err instanceof RateBandError) return err.message;
+  if (err instanceof StatutoryFactsError) return err.message;
   if (err instanceof z.ZodError) return err.issues[0]?.message ?? 'Check the form.';
   if (err instanceof Error) return err.message;
   return 'Something went wrong.';
@@ -1452,6 +1456,123 @@ export async function postRateBandAction(
       };
     }
     return { ok: 'Posted. The public pages read this table directly.' };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+/**
+ * The § 1812.529 facts that live on the household.
+ *
+ * Optional in the schema and required by the referral, which is the right way round: a
+ * household enquires before anybody knows the address, and the gate is at the referral.
+ * So every field here may be submitted empty, and the refusals for taking a fact away
+ * that a record already stands on are in the query module, with the reasons.
+ */
+export async function recordHouseholdFactsAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const text = z.string().trim().max(400).optional();
+    const parsed = z.object({
+      householdId: uuid,
+      caseId: uuid,
+      crName: text,
+      crAge: z.coerce.number().int().min(0, 'An age cannot be negative.')
+        .max(120, 'That looks like a typo rather than an age.').optional(),
+      crAddress: text,
+      crAccessNotes: text,
+      physicianName: text,
+      physicianPractice: text,
+      physicianPhone: text,
+      physicianFax: text,
+    }).parse({
+      householdId: form.get('householdId'),
+      caseId: form.get('caseId'),
+      crName: form.get('crName') || undefined,
+      crAge: form.get('crAge') || undefined,
+      crAddress: form.get('crAddress') || undefined,
+      crAccessNotes: form.get('crAccessNotes') || undefined,
+      physicianName: form.get('physicianName') || undefined,
+      physicianPractice: form.get('physicianPractice') || undefined,
+      physicianPhone: form.get('physicianPhone') || undefined,
+      physicianFax: form.get('physicianFax') || undefined,
+    });
+
+    const written = await recordHouseholdFacts(ctx, parsed.householdId, {
+      crName: parsed.crName ?? null,
+      crAge: parsed.crAge ?? null,
+      crAddress: parsed.crAddress ?? null,
+      crAccessNotes: parsed.crAccessNotes ?? null,
+      physicianName: parsed.physicianName ?? null,
+      physicianPractice: parsed.physicianPractice ?? null,
+      physicianPhone: parsed.physicianPhone ?? null,
+      physicianFax: parsed.physicianFax ?? null,
+    });
+
+    revalidatePath(`/cases/${parsed.caseId}`);
+    revalidatePath(`/match/${parsed.caseId}`);
+    revalidatePath('/register');
+    revalidatePath('/today');
+
+    if (written.changed.length === 0) return { ok: 'Nothing had changed.' };
+    if (written.notes.length > 0) {
+      return { ok: written.notes.map((n) => n.message).join(' ') };
+    }
+    return { ok: 'Recorded on the household.' };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+/** The § 1812.529 facts that live on the case, and the terms read beside them. */
+export async function recordCaseTermsAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const parsed = z.object({
+      caseId: uuid,
+      startsOn: isoDate.optional(),
+      endsOn: isoDate.optional(),
+      hoursPerWeek: z.coerce.number().int()
+        .positive('Hours per week has to be more than nothing.')
+        .max(168, 'There are 168 hours in a week.').optional(),
+      feePct: z.coerce.number()
+        .positive('A fee of nothing is not a fee. Leave it empty until it is agreed.')
+        .max(100, 'A fee cannot be more than the whole job cost.').optional(),
+      rateAgreed: z.coerce.number()
+        .positive('A rate has to be more than nothing.')
+        .max(1000, 'That looks like a typo rather than an hourly rate.').optional(),
+    }).parse({
+      caseId: form.get('caseId'),
+      startsOn: form.get('startsOn') || undefined,
+      endsOn: form.get('endsOn') || undefined,
+      hoursPerWeek: form.get('hoursPerWeek') || undefined,
+      feePct: form.get('feePct') || undefined,
+      rateAgreed: form.get('rateAgreed') || undefined,
+    });
+
+    const written = await recordCaseTerms(ctx, parsed.caseId, {
+      startsOn: parsed.startsOn ?? null,
+      endsOn: parsed.endsOn ?? null,
+      hoursPerWeek: parsed.hoursPerWeek ?? null,
+      feePct: parsed.feePct ?? null,
+      rateAgreed: parsed.rateAgreed ?? null,
+    });
+
+    revalidatePath(`/cases/${parsed.caseId}`);
+    revalidatePath(`/match/${parsed.caseId}`);
+    revalidatePath('/register');
+    revalidatePath('/today');
+    revalidatePath('/cases');
+
+    if (written.changed.length === 0) return { ok: 'Nothing had changed.' };
+    if (written.notes.length > 0) {
+      return { ok: written.notes.map((n) => n.message).join(' ') };
+    }
+    return { ok: 'Recorded on the case.' };
   } catch (err) {
     return fail(messageOf(err));
   }
