@@ -20,7 +20,9 @@ import {
 } from '@/lib/metrics';
 import {
   bySource, capacity, failures, funnel, leakage, measureForCase, trendOf, FUNNEL_STEPS,
+  partnerPopulation as partnerPopulationOnMeasure,
 } from '@/lib/queries/measure';
+import { partnerPopulation } from '@/lib/queries/partners';
 
 let db: DbHandle;
 
@@ -517,5 +519,93 @@ describe('nothing in lib/metrics.ts is dead', () => {
       dead,
       `exported from lib/metrics.ts and called by nothing: ${dead.join(', ')}`,
     ).toEqual([]);
+  });
+});
+
+/**
+ * The two figures on this screen that an operator read as one.
+ *
+ * /measure showed three rows whose source labels began "Partner" and /partners showed no
+ * family sent by anybody. The source table was never a partner count: a source is free
+ * text typed on an enquiry, and in the seed two of those three labels name work that
+ * belongs to a different partner entirely. The partner figure is a foreign key, it
+ * decides who may read an outcome, and it belongs to /partners — so this screen imports
+ * it rather than keeping a second copy.
+ */
+describe('the partner figure on the measurement screen', () => {
+  it('is the same definition the partners module owns, not a copy of it', () => {
+    /*
+     * Identity, not equality. Two functions that agree today are two functions, and the
+     * whole defect was two queries that agreed about their intent and not about their
+     * rows. There is one function, re-exported, so /measure cannot fork it.
+     */
+    expect(partnerPopulationOnMeasure).toBe(partnerPopulation);
+  });
+
+  it('is rendered on the screen, beside the labels it is not', async () => {
+    /*
+     * A figure that is correct and never reached is this project's signature failure.
+     * `bySource` had three of them before this change, so the test says the page renders
+     * the population AND says what the label table is, in the same section.
+     */
+    const page = readFileSync(
+      join(import.meta.dirname, '..', 'app/(app)/measure/page.tsx'), 'utf8');
+
+    expect(page).toMatch(/partnerPopulation\(\)/);
+    expect(page).toMatch(/partners\.referrals/);
+    // The words that stop the table below being read as an attribution.
+    expect(page).toMatch(/not a link to anybody/);
+
+    const pop = await partnerPopulationOnMeasure();
+    expect(pop.partners).toBeGreaterThan(0);
+    expect(pop.referrals).toBeGreaterThan(0);
+  });
+
+  it('groups enquiries by a source the running system actually records', async () => {
+    /*
+     * This read `payload ->> 'source'` and the only writer of that key is the seed.
+     * `convertInquiry` emits `inquiry_received` with `sourcePath`, so on real data every
+     * row of the table collapsed into "Not recorded" while the seeded console showed a
+     * tidy nine-row breakdown — green in the suite, and never once computed over a row
+     * the running system wrote.
+     *
+     * The fixture is written the way `convertInquiry` writes it, not the way the seed
+     * does, which is the only reason this can fail.
+     */
+    await db.query('BEGIN');
+    try {
+      const [household] = await db.query<{ id: string }>(
+        `INSERT INTO households (display_name, dm_name, cr_area)
+         VALUES ('Source Key Fixture', 'A Daughter', 'santa_monica') RETURNING id`,
+      );
+      const [kase] = await db.query<{ id: string }>(
+        `INSERT INTO cases (household_id, care) VALUES ($1, 'companion') RETURNING id`,
+        [household!.id],
+      );
+      await db.query(
+        `INSERT INTO metric_events (event, case_id, payload)
+         VALUES ('inquiry_received', $1, $2::jsonb)`,
+        [kase!.id, JSON.stringify({ inquiryId: null, sourcePath: '/refer', converted: true })],
+      );
+
+      const rows = await bySource(TEST_CTX);
+      const refer = rows.find((r) => r.source === '/refer');
+      expect(
+        refer,
+        'an enquiry recorded the way convertInquiry records it did not reach the '
+        + 'source table, so every real enquiry falls into "Not recorded"',
+      ).toBeTruthy();
+      expect(refer!.enquiries).toBe(1);
+
+      // And nothing was swallowed on the way: the totals still account for every event.
+      const total = rows.reduce((n, r) => n + r.enquiries, 0);
+      const events = await one<{ n: string }>(
+        `SELECT count(*)::text AS n FROM metric_events
+          WHERE event = 'inquiry_received' AND case_id IS NOT NULL`,
+      );
+      expect(total).toBe(Number(events.n));
+    } finally {
+      await db.query('ROLLBACK');
+    }
   });
 });

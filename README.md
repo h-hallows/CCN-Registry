@@ -183,10 +183,24 @@ GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO ccn_app;
 
 ### Sign-in
 
-There is no mail provider wired. The magic link is written to the server console, which
-on a deployed host means the function logs. Wiring Resend or Postmark is a deployment
-step; for a single-operator internal tool, host-level access protection in front of the
-whole site is the simpler answer.
+Locally the magic link is printed to the server console, because there is nowhere else
+for it to go and nothing is at stake.
+
+On a deployment it is not printed anywhere, and there is no setting that makes it so.
+This section used to say the link could be read out of the function logs, which was true
+of an earlier build and is the practice `@h-hallows/core`'s mail module was written to
+end: a magic link is a bearer credential, and a log is read by platform collaborators,
+log drains and aggregators with retention windows nobody is watching. The console driver
+therefore resolves to `none` under `NODE_ENV=production`, `MAIL_DRIVER=console` does not
+override it, and the sign-in form checks that a mailer is configured before it looks any
+address up — so an unwired deployment refuses everyone identically rather than leaking
+which addresses are permitted.
+
+That leaves two ways in, and both are above: wire `RESEND_API_KEY` and `MAIL_FROM` under
+*Getting a deployment running*, or mint a link yourself with `npm run operator:link` as
+under *Getting in before mail is wired*. Host-level access protection in front of the
+whole site is still worth having for a single-operator tool, but it is a second lock on
+the door rather than a substitute for the first.
 
 ## Before this tool is worth anything
 

@@ -42,6 +42,9 @@ import {
 } from '@/lib/queries/documents';
 import { setProviderReferralStatus, upsertCredential } from '@/lib/queries/providers';
 import {
+  PROVIDER_TYPES, ProviderEditError, recordProviderFacts, recordStatedRate,
+} from '@/lib/queries/providerEdits';
+import {
   endEngagement, makeReferral, markWrittenStatementSent, recordReferralOutcome,
   ReferralError,
 } from '@/lib/domain/referral';
@@ -96,6 +99,7 @@ function messageOf(err: unknown): string {
   if (err instanceof RateBandError) return err.message;
   if (err instanceof StatutoryFactsError) return err.message;
   if (err instanceof AlternateError) return err.message;
+  if (err instanceof ProviderEditError) return err.message;
   if (err instanceof z.ZodError) return err.issues[0]?.message ?? 'Check the form.';
   if (err instanceof Error) return err.message;
   return 'Something went wrong.';
@@ -206,6 +210,188 @@ export async function setReferralStatusAction(
     revalidatePath(`/roster/${providerId}`);
     revalidatePath('/roster');
     return { ok: 'Referral status updated. No engagement was changed.' };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+/**
+ * The provider facts a referral depends on.
+ *
+ * `getAll` for the four list columns, and `get` would be wrong in the way that does not
+ * announce itself: `areas` and `availability` arrive as a tick per value, so taking the
+ * first would record a provider as covering one area out of five and leave the other
+ * four looking saved. An empty list is a real answer for each of them — a provider who
+ * has not said where they work or when is a provider the filters should not be offering
+ * — so an empty submission is written rather than treated as a form that forgot.
+ *
+ * `.strict()` because this form posts eleven fields into a statement that names eleven
+ * columns, and a field arriving under a name the schema does not have should stop the
+ * save rather than be dropped on the way through.
+ */
+export async function recordProviderFactsAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const text = z.string().trim().max(400).optional();
+    const values = (key: string): string[] =>
+      form.getAll(key).map(String).filter((v) => v.trim().length > 0);
+
+    const parsed = z.object({
+      providerId: uuid,
+      type: z.enum(PROVIDER_TYPES),
+      // A select, so the absent case is a form that was tampered with rather than a no.
+      transports: z.enum(['yes', 'no'], { message: 'Say whether they drive clients.' }),
+      areas: z.array(z.string().trim().min(1)).max(20, 'That is a county, not a patch.'),
+      maxTravelMin: z.coerce.number().int()
+        .positive('How far they will travel is a number of minutes above nothing.')
+        .max(240, 'Four hours each way is not a travel limit, it is a different job.')
+        .optional(),
+      availability: z.array(z.string().trim().min(1)).max(21),
+      languages: z.array(z.string().trim().min(1)).max(20),
+      specialties: z.array(z.string().trim().min(1)).max(30),
+      restrictions: text,
+      preferredName: z.string().trim().max(80).optional(),
+      phone: z.string().trim().max(40).optional(),
+      email: z.string().trim().max(200).optional(),
+    }).strict().parse({
+      providerId: form.get('providerId'),
+      type: form.get('type'),
+      transports: form.get('transports'),
+      areas: values('areas'),
+      maxTravelMin: form.get('maxTravelMin') || undefined,
+      availability: values('availability'),
+      languages: values('languages'),
+      specialties: values('specialties'),
+      restrictions: form.get('restrictions') || undefined,
+      preferredName: form.get('preferredName') || undefined,
+      phone: form.get('phone') || undefined,
+      email: form.get('email') || undefined,
+    });
+
+    const written = await recordProviderFacts(ctx, parsed.providerId, {
+      type: parsed.type,
+      transports: parsed.transports === 'yes',
+      areas: parsed.areas,
+      maxTravelMin: parsed.maxTravelMin ?? null,
+      availability: parsed.availability,
+      languages: parsed.languages,
+      specialties: parsed.specialties,
+      restrictions: parsed.restrictions ?? null,
+      preferredName: parsed.preferredName ?? null,
+      phone: parsed.phone ?? null,
+      email: parsed.email ?? null,
+    });
+
+    /*
+     * Every screen whose numbers move, and there are more of them than for any other
+     * write in this file, because these columns are the ones the filters read. The
+     * roster badge and its eligible count, the match screen's eligible and excluded
+     * lists for every case this provider stands on, the Cover table on those cases,
+     * `/today`'s thin-bench section — which counts ELIGIBLE alternates — and
+     * `/compliance`, whose queues are keyed off the credential matrix that `type` and
+     * `transports` decide.
+     */
+    revalidatePath(`/roster/${parsed.providerId}`);
+    revalidatePath('/roster');
+    revalidatePath('/match');
+    revalidatePath('/today');
+    revalidatePath('/compliance');
+    revalidatePath('/cases');
+    for (const caseId of written.standingCaseIds) {
+      revalidatePath(`/match/${caseId}`);
+      revalidatePath(`/cases/${caseId}`);
+    }
+
+    if (written.changed.length === 0) {
+      return {
+        ok: written.notes.length > 0
+          ? `Nothing had changed. ${written.notes.map((n) => n.message).join(' ')}`
+          : 'Nothing had changed.',
+      };
+    }
+
+    /*
+     * Says which facts moved, not just that something did. The point of the form is that
+     * a provider becomes referable, and an operator who reads "Recorded." has to go to
+     * another screen to find out whether that happened — so the answer names the columns
+     * and then says where the provider now stands.
+     */
+    if (written.notes.length > 0) {
+      return { ok: written.notes.map((n) => n.message).join(' ') };
+    }
+    return {
+      ok: `Recorded: ${written.changed.map((c) => c.replace(/_/g, ' ')).join(', ')}. `
+        + `${written.eligible
+          ? 'This provider clears the filters and can be offered to a household.'
+          : 'This provider is still on no shortlist.'}`,
+    };
+  } catch (err) {
+    return fail(messageOf(err));
+  }
+}
+
+/**
+ * The rate the provider stated, transcribed.
+ *
+ * I5, § 1812.5095(b)(3), § 1812.530 and § 1812.531. The figure is the nurse's own and the
+ * registry's charge is `cases.fee_pct`, a different number read against a different
+ * schedule — so this form offers no default, no range, no suggestion and no cap, and the
+ * only validation is that a number is a number above nothing. The provider's own screen
+ * at `/pro/rate` writes the same column from their own session; this exists because most
+ * of the roster has no portal account and states a rate down a telephone, and until now
+ * there was nowhere for the operator to put it.
+ *
+ * The confirmation is `z.literal('yes')` on an un-prechecked box, the same shape as the
+ * § 1812.5095(f) disclosure confirmation on the referral, and for the same reason: it is
+ * an assertion about something that happened outside the software, so it has to be made
+ * rather than assumed.
+ */
+export async function recordStatedRateAction(
+  _prev: ActionState | undefined, form: FormData,
+): Promise<ActionState> {
+  const { ctx } = await requireOperator();
+  try {
+    const parsed = z.object({
+      providerId: uuid,
+      rateHourly: z.coerce.number()
+        .positive('A rate has to be more than nothing. Leave it empty if they would '
+          + 'rather talk about it.')
+        .max(1000, 'That looks like a typo rather than an hourly rate.')
+        .optional(),
+      rateNotes: z.string().trim().max(400).optional(),
+      stated: z.literal('yes', {
+        message: 'Confirm the provider stated this rate. Nothing in this registry sets '
+          + 'it, suggests it or takes a share of it.',
+      }),
+    }).strict().parse({
+      providerId: form.get('providerId'),
+      rateHourly: form.get('rateHourly') || undefined,
+      rateNotes: form.get('rateNotes') || undefined,
+      stated: form.get('stated'),
+    });
+
+    const written = await recordStatedRate(ctx, parsed.providerId, {
+      rateHourly: parsed.rateHourly === undefined ? null : String(parsed.rateHourly),
+      rateNotes: parsed.rateNotes ?? null,
+      statedByProvider: parsed.stated === 'yes',
+    });
+
+    revalidatePath(`/roster/${parsed.providerId}`);
+    revalidatePath('/roster');
+    // The rate is shown beside every candidate the match screen offers, and classified
+    // against the case's band there. It excludes nobody — I5 — but it is read.
+    revalidatePath('/match');
+
+    if (!written.changed) return { ok: 'Nothing had changed.' };
+    return {
+      ok: written.rateHourly === null
+        ? 'Recorded that they have not stated a rate. We will say so when they are put '
+          + 'forward.'
+        : `Recorded $${written.rateHourly} an hour, as stated by the provider. It stays `
+          + 'negotiable with the household.',
+    };
   } catch (err) {
     return fail(messageOf(err));
   }

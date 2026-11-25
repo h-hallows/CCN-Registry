@@ -1,7 +1,10 @@
 /** Compliance screen. Spec § 5 and § 7 (M7). */
 import { getDb } from '@h-hallows/core/db';
 import { auditRead, type AuditContext } from '@/lib/audit';
-import { SEVERITY, requiredFor, type CredStatus } from '@h-hallows/core/domain';
+import {
+  SEVERITY, civilLA, formatISODate, requiredFor, type CredStatus,
+} from '@h-hallows/core/domain';
+import { dueWording } from '@/lib/domain/buckets';
 import { listProvidersWithStanding, asDate, asTimestamp } from './providers';
 import type { CredentialType } from '@h-hallows/core/schema';
 
@@ -26,6 +29,51 @@ export interface ReverifyRow {
   verificationSource: string;
 }
 
+/**
+ * The § 1812.5095(f) state of one written statement, named once.
+ *
+ * What stood here was `onTime: boolean | null`, in which `null` meant two opposite
+ * things: a statement that is overdue and was never sent, which is the breach the
+ * section exists to catch, and one that is not yet due, which is lawful. Every consumer
+ * then re-derived the difference from that null and a date, and one of them could not —
+ * the screen told them apart by calling `dueWording` on the due date while
+ * `disclosureLogToCsv` wrote "not sent" for both, so the export and the screen disagreed
+ * about the same row and the auditable artifact was the one that could not show a
+ * breach.
+ *
+ * Four states, because the section measures two things and each has two answers:
+ * whether the statement went out at all, and whether it went out by the deadline.
+ */
+export type WrittenStatementState =
+  | 'sent_on_time'
+  | 'sent_late'
+  | 'overdue'
+  | 'not_yet_due';
+
+/**
+ * Which state a disclosure row is in. The only place this decision is made.
+ *
+ * `dueOn` is the stored `written_due_on`, counted once by `writtenStatementDueOn` when
+ * the disclosure was recorded, so this compares against it and never recomputes it: a
+ * deadline recomputed later moves whenever the California holiday table or the counting
+ * rule changes, and the date the operator was given is the date they are held to.
+ *
+ * `today` is California's civil date rather than the server's. A UTC host is a day ahead
+ * of Pacific from 5pm, which is long enough to call a statement that is still due
+ * tomorrow a breach tonight.
+ *
+ * Due today is not yet a breach — the statement may still go out before the day ends,
+ * and that is the line `dueWording` already drew on the screen.
+ */
+export function writtenStatementState(
+  dueOn: string,
+  sentOn: string | null,
+  today: Date,
+): WrittenStatementState {
+  if (sentOn !== null) return sentOn <= dueOn ? 'sent_on_time' : 'sent_late';
+  return dueOn < formatISODate(civilLA(today)) ? 'overdue' : 'not_yet_due';
+}
+
 export interface DisclosureLogRow {
   disclosureId: string;
   caseId: string;
@@ -38,7 +86,7 @@ export interface DisclosureLogRow {
   writtenDueOn: string;
   writtenSentOn: string | null;
   writtenMethod: string | null;
-  onTime: boolean | null;
+  writtenState: WrittenStatementState;
 }
 
 export interface PaperworkGapRow {
@@ -162,7 +210,7 @@ export async function getCompliance(ctx: AuditContext, today = new Date()): Prom
       writtenDueOn: dueOn,
       writtenSentOn: sentOn,
       writtenMethod: (r.written_method as string) ?? null,
-      onTime: sentOn === null ? null : sentOn <= dueOn,
+      writtenState: writtenStatementState(dueOn, sentOn, today),
     };
   });
 
@@ -194,17 +242,93 @@ export async function getCompliance(ctx: AuditContext, today = new Date()): Prom
   };
 }
 
-/** M7: the disclosure log exports with disclosed-to, by, method, timestamp, written due and sent. */
+export interface WrittenStatementCell {
+  /** The day the statement went out, where the cell has one to name. */
+  sentOn: string | null;
+  /** What the cell says about the state. */
+  wording: string;
+  /** The custom property the screen paints the cell with. */
+  color: string;
+}
+
+/**
+ * The disclosure log's "Written sent" cell — the screen's one rendering of the state.
+ *
+ * Wording and colour are decided here, beside the exported cell, because they are the
+ * same claim in another form. It was the colour, chosen on the screen from a null rather
+ * than from a state, that painted a statement which was not yet due in the same critical
+ * red as a missed statutory deadline.
+ *
+ * `today` is the clock the rows were built with. It supplies only the day count in the
+ * wording; the classification comes from `state` and is never decided again here.
+ */
+export function writtenStatementCell(
+  row: DisclosureLogRow,
+  today: Date,
+): WrittenStatementCell {
+  switch (row.writtenState) {
+    case 'sent_on_time':
+      return {
+        sentOn: row.writtenSentOn, wording: 'sent on time', color: 'var(--color-ok)',
+      };
+    case 'sent_late':
+      return {
+        sentOn: row.writtenSentOn, wording: 'sent late', color: 'var(--color-expired)',
+      };
+    case 'overdue':
+      // Critical belongs to this state alone. It is the § 1812.5095(f) breach, and a
+      // colour that also means "nothing is wrong yet" is not a warning.
+      return {
+        sentOn: null, wording: dueWording(row.writtenDueOn, today),
+        color: 'var(--color-critical)',
+      };
+    case 'not_yet_due':
+      return {
+        sentOn: null, wording: dueWording(row.writtenDueOn, today),
+        color: 'var(--ink-soft)',
+      };
+  }
+}
+
+/**
+ * How many rows stand in each state.
+ *
+ * A record over the whole union rather than a `filter` per figure on the screen: the
+ * counter that read "outstanding" put the overdue and the not-yet-due in one bucket, so
+ * the number at the top of the compliance screen could not be read as a number of
+ * breaches. Keyed by the union, a state added later cannot go uncounted without the
+ * typecheck saying so.
+ */
+export function countWrittenStatements(
+  rows: DisclosureLogRow[],
+): Record<WrittenStatementState, number> {
+  const counts: Record<WrittenStatementState, number> = {
+    sent_on_time: 0, sent_late: 0, overdue: 0, not_yet_due: 0,
+  };
+  for (const r of rows) counts[r.writtenState] += 1;
+  return counts;
+}
+
+/**
+ * M7: the disclosure log exports with disclosed-to, by, method, timestamp, written due
+ * and sent.
+ *
+ * The last column was `on_time`, carrying 'true', 'false' or 'not sent' — and 'not sent'
+ * stood for an overdue statement and for one that was not yet due alike, so the single
+ * row an auditor opens this file to find read exactly like a lawful one. The column is
+ * now the state itself: `overdue` names the breach in a value a filter can select, and
+ * one that cannot be mistaken for `not_yet_due`.
+ */
 export function disclosureLogToCsv(rows: DisclosureLogRow[]): string {
   const header = [
     'disclosure_id', 'case_id', 'household', 'providers_referred', 'disclosed_to',
     'disclosed_by', 'method', 'disclosed_at', 'written_due_on', 'written_sent_on',
-    'written_method', 'on_time',
+    'written_method', 'written_state',
   ];
   const body = rows.map((r) => [
     r.disclosureId, r.caseId, r.householdName, r.providerNames.join('; '), r.disclosedTo,
     r.disclosedBy, r.method, r.disclosedAt, r.writtenDueOn, r.writtenSentOn ?? '',
-    r.writtenMethod ?? '', r.onTime === null ? 'not sent' : String(r.onTime),
+    r.writtenMethod ?? '', r.writtenState,
   ]);
   return [header, ...body].map((cells) => cells.map(csvCell).join(',')).join('\r\n');
 }

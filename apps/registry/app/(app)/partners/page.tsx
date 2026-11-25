@@ -31,6 +31,11 @@ export default async function PartnersPage() {
     users: usersByPartner.get(p.id) ?? [],
   }));
 
+  /*
+   * Summed from the rows rather than read again, so the header and the cards below it
+   * cannot disagree. `tests/partners.test.ts` asserts this sum equals
+   * `partnerPopulation()`, which is what /measure reports.
+   */
   const sent = partners.reduce((n, p) => n + p.sent, 0);
   const became = partners.reduce((n, p) => n + p.became, 0);
 
@@ -39,9 +44,22 @@ export default async function PartnersPage() {
       <div className="mb-4">
         <h1 className="text-lg font-semibold tracking-tight">Referral partners</h1>
         <p className="mt-0.5 text-xs" style={{ color: 'var(--ink-faint)' }}>
-          {partners.length} on the list ·{' '}
-          <span className="nums">{sent}</span> families sent ·{' '}
-          <span className="nums">{became}</span> became a household
+          <span className="nums">{partners.length}</span> on the list ·{' '}
+          <span className="nums">{sent}</span> families attributed to one of them ·{' '}
+          <span className="nums">{became}</span> of those on the books
+        </p>
+        {/*
+          * Said in words, because the figure above it was misread against the source
+          * table on /measure: the two were compared as though they counted the same
+          * thing, and one of them read zero while the other read three.
+          */}
+        <p className="mt-1 max-w-prose text-xs leading-relaxed"
+          style={{ color: 'var(--ink-faint)' }}>
+          Attributed means keyed to a partner on the record — the enquiry they sent,
+          or the household it became. It is not the source line somebody typed on an
+          enquiry: Measure groups those labels, and a label beginning
+          &ldquo;Partner&rdquo; is only what was typed. This is the figure that decides
+          who may read an outcome, so it is the one counted here.
         </p>
       </div>
 

@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { requireOperator } from '@/lib/operator';
-import { getCompliance } from '@/lib/queries/compliance';
+import {
+  countWrittenStatements, getCompliance, writtenStatementCell,
+} from '@/lib/queries/compliance';
 import {
   earliestEffectiveFrom, feeScheduleHistory, nurseDeliveries,
 } from '@/lib/queries/feeSchedule';
@@ -8,7 +10,6 @@ import { postFeeScheduleAction, recordFeeDeliveryAction } from '@/app/(app)/acti
 import { ActionForm, Disclose } from '@/components/ActionForm';
 import { Banner } from '@/components/ui';
 import { civilLA, formatISODate, LABEL, REVERIFY_AFTER_DAYS } from '@h-hallows/core/domain';
-import { dueWording } from '@/lib/domain/buckets';
 import {
   CredentialPill, Empty, RowLink, Section, shortDate, shortDateTime,
 } from '@/components/ui';
@@ -27,8 +28,14 @@ export default async function CompliancePage() {
   const missing = nurses.filter((n) => n.missingCurrent && n.status !== 'do_not_refer');
   const earliest = earliestEffectiveFrom(now);
   const todayISO = formatISODate(civilLA(now));
-  const late = c.disclosureLog.filter((d) => d.onTime === false).length;
-  const outstanding = c.disclosureLog.filter((d) => d.onTime === null).length;
+  /*
+   * One count per § 1812.5095(f) state, from the query layer. The two filters that
+   * stood here read `onTime === null` as "outstanding", which put a statement that is
+   * overdue and a statement that is not yet due in the same figure — so the headline
+   * number on the compliance screen was not a number of breaches, and an operator
+   * reading it could not tell whether anything was wrong.
+   */
+  const written = countWrittenStatements(c.disclosureLog);
 
   return (
     <>
@@ -38,8 +45,9 @@ export default async function CompliancePage() {
           <p className="mt-0.5 text-xs" style={{ color: 'var(--ink-faint)' }}>
             {c.rosterStanding.eligible} of {c.rosterStanding.total} referred providers eligible ·{' '}
             {c.credentialQueue.length} credential item{c.credentialQueue.length === 1 ? '' : 's'} ·{' '}
-            {outstanding} written statement{outstanding === 1 ? '' : 's'} outstanding
-            {late > 0 ? ` · ${late} sent late` : ''}
+            {written.overdue} written statement{written.overdue === 1 ? '' : 's'} overdue
+            {written.not_yet_due > 0 ? ` · ${written.not_yet_due} not yet due` : ''}
+            {written.sent_late > 0 ? ` · ${written.sent_late} sent late` : ''}
           </p>
         </div>
         <Link href="/api/export/disclosures" className="btn btn-primary" prefetch={false}>
@@ -137,31 +145,31 @@ export default async function CompliancePage() {
                 </tr>
               </thead>
               <tbody>
-                {c.disclosureLog.map((d) => (
-                  <tr key={d.disclosureId}>
-                    <td><RowLink href={`/cases/${d.caseId}`}>{d.householdName}</RowLink></td>
-                    <td style={{ color: 'var(--ink-soft)' }}>{d.providerNames.join(', ') || '—'}</td>
-                    <td style={{ color: 'var(--ink-soft)' }}>{d.disclosedTo}</td>
-                    <td style={{ color: 'var(--ink-faint)' }}>{d.disclosedBy}</td>
-                    <td style={{ color: 'var(--ink-faint)' }}>
-                      {d.method === 'phone' ? 'phone' : 'in person'}
-                    </td>
-                    <td className="nums" style={{ color: 'var(--ink-faint)' }}>
-                      {shortDateTime(d.disclosedAt)}
-                    </td>
-                    <td className="nums" style={{ color: 'var(--ink-soft)' }}>
-                      {shortDate(d.writtenDueOn)}
-                    </td>
-                    <td className="nums" style={{
-                      color: d.onTime === null ? 'var(--color-critical)'
-                        : d.onTime ? 'var(--color-ok)' : 'var(--color-expired)',
-                    }}>
-                      {d.writtenSentOn
-                        ? `${shortDate(d.writtenSentOn)}${d.onTime ? '' : ' — late'}`
-                        : dueWording(d.writtenDueOn, now)}
-                    </td>
-                  </tr>
-                ))}
+                {c.disclosureLog.map((d) => {
+                  const cell = writtenStatementCell(d, now);
+                  return (
+                    <tr key={d.disclosureId}>
+                      <td><RowLink href={`/cases/${d.caseId}`}>{d.householdName}</RowLink></td>
+                      <td style={{ color: 'var(--ink-soft)' }}>{d.providerNames.join(', ') || '—'}</td>
+                      <td style={{ color: 'var(--ink-soft)' }}>{d.disclosedTo}</td>
+                      <td style={{ color: 'var(--ink-faint)' }}>{d.disclosedBy}</td>
+                      <td style={{ color: 'var(--ink-faint)' }}>
+                        {d.method === 'phone' ? 'phone' : 'in person'}
+                      </td>
+                      <td className="nums" style={{ color: 'var(--ink-faint)' }}>
+                        {shortDateTime(d.disclosedAt)}
+                      </td>
+                      <td className="nums" style={{ color: 'var(--ink-soft)' }}>
+                        {shortDate(d.writtenDueOn)}
+                      </td>
+                      <td className="nums" style={{ color: cell.color }}>
+                        {cell.sentOn
+                          ? `${shortDate(cell.sentOn)} — ${cell.wording}`
+                          : cell.wording}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

@@ -186,22 +186,51 @@ describe('saving the form does not drop the cover a case already has', () => {
    * `standingAlternates` exists so the page can render them ticked; this proves the
    * writer accepts them when it does.
    */
+  /*
+   * HOW SOMEBODY STOPS CLEARING THE FILTERS, AND WHY NOT BY A LAPSED CREDENTIAL.
+   *
+   * This read `UPDATE credentials SET expires_on = CURRENT_DATE - 1 WHERE type =
+   * 'tb_clearance'` on whichever provider the filters offered first, and restored it to
+   * a fixed `CURRENT_DATE + 365`. It was green on the day it was written and red the
+   * next morning. Three things were wrong with it, and each is worth keeping out of
+   * here: which credentials a provider must hold depends on their type; which provider
+   * the filters offer first depends on today's date; and a provider whose type requires
+   * none of that paperwork stays eligible however much of it expires — which is the
+   * case the fixture happened to offer the following day. Expiring every credential
+   * they hold does not fix it, because for such a provider no credential decides
+   * anything.
+   *
+   * The rule under test is not about credentials. It is that an alternate already
+   * standing is kept when they no longer clear the filters, whatever stopped them. So
+   * use the one route the filters certainly read — the provider's own standing — and
+   * put it back afterwards. Nothing here depends on the date, on a provider's type, or
+   * on what the seed happened to offer first.
+   */
+  const standingOf = async (providerId: string) => (await db.query<{ status: string }>(
+    `SELECT status::text AS status FROM providers WHERE id = $1`, [providerId],
+  ))[0]!.status;
+
+  const setStanding = (providerId: string, status: string) => db.query(
+    `UPDATE providers SET status = $2::provider_status WHERE id = $1`,
+    [providerId, status],
+  );
+
   it('keeps an alternate who no longer clears the filters', async () => {
     const { caseId, eligible } = await caseWithEligible(2);
     await remember(caseId);
     const [keep, other] = [eligible[0]!, eligible[1]!];
+    const wasStanding = await standingOf(keep);
 
+    // Recorded while they still cleared the filters: cover the household already had.
     await recordAlternates(TEST_CTX, caseId, [keep]);
+    await setStanding(keep, 'do_not_refer');
 
-    // Take them out of the eligible set the way the world does it: a lapsed credential.
-    await db.query(
-      `UPDATE credentials SET expires_on = CURRENT_DATE - 1
-        WHERE provider_id = $1 AND type = 'tb_clearance'`, [keep]);
     try {
       const screen = await screenCase(db, caseId);
       expect(
         screen!.eligible.some((e) => e.providerId === keep),
-        'expiring the credential did not remove them from the eligible list',
+        'the provider chosen for having lost eligibility is eligible again, so the rest '
+        + 'of this test is not testing what it says',
       ).toBe(false);
 
       // Still named, because they were already standing.
@@ -209,9 +238,7 @@ describe('saving the form does not drop the cover a case already has', () => {
       expect(written.added).toHaveLength(1);
       expect(await recordedOn(caseId)).toEqual([keep, other]);
     } finally {
-      await db.query(
-        `UPDATE credentials SET expires_on = CURRENT_DATE + 365
-          WHERE provider_id = $1 AND type = 'tb_clearance'`, [keep]);
+      await setStanding(keep, wasStanding);
     }
   });
 

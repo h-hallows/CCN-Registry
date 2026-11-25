@@ -36,6 +36,13 @@
 import { getDb } from '@h-hallows/core/db';
 import { auditRead, type AuditContext } from '@/lib/audit';
 import type { ServiceFailureKind } from '@/lib/metrics';
+/*
+ * The partner figure this screen reports is NOT defined here. /partners owns referral
+ * partners, so it owns what counts as one and what counts as a referral from one, and
+ * this screen imports that rather than keeping a second copy. Two copies of a
+ * definition is exactly how these two screens came to print 0 and 3 for the same fact.
+ */
+export { partnerPopulation, type PartnerPopulation } from '@/lib/queries/partners';
 
 /** The § 8 event vocabulary, in the order the work actually happens. */
 export const FUNNEL_STEPS = [
@@ -155,6 +162,16 @@ export async function funnel(ctx: AuditContext): Promise<FunnelRow[]> {
 }
 
 export interface SourceRow {
+  /**
+   * A LABEL, not a link to anybody.
+   *
+   * It is whatever was recorded on the enquiry, and nothing checks it against a row in
+   * `referral_partners`. A label reading "Partner: estate attorney" is proof that
+   * somebody typed those words and of nothing else — in the seed, two of the three
+   * such labels are keyed to a partner whose work is something else entirely. The
+   * figure that means a named partner sent a family is `partnerPopulation().referrals`,
+   * which /partners owns and this module re-exports rather than redefines.
+   */
   source: string;
   enquiries: number;
   reachedReferral: number;
@@ -166,13 +183,28 @@ export interface SourceRow {
  * § 8 needs this to answer whether the binding constraint is demand or capacity: a
  * channel that sends many and converts none is not the same problem as a channel that
  * sends three and converts all three.
+ *
+ * WHICH PAYLOAD KEY. This read `payload ->> 'source'` alone, and the only writer of that
+ * key is the seed. `convertInquiry` emits `inquiry_received` with `sourcePath`, so on
+ * real data every row of this table collapsed into "Not recorded" while the seeded
+ * console showed a tidy nine-row breakdown — a figure that was present, correct,
+ * green in the suite and never once computed over a row the running system wrote.
+ *
+ * Both keys are read now, the label first and the page second, because where somebody
+ * recorded a channel that is the better answer. The other half of the fix is not in
+ * this file and is not made here: `convertInquiry` records which PAGE an enquiry
+ * arrived on, and a page is not a channel — `/refer` cannot tell a discharge planner
+ * from an attorney, so until the emitter records the channel this table can only group
+ * what it was given.
  */
 export async function bySource(ctx: AuditContext): Promise<SourceRow[]> {
   const { query } = await getDb();
   const rows = await query<{ source: string; enquiries: string; referred: string }>(
     `WITH enq AS (
        SELECT case_id,
-              coalesce(nullif(payload ->> 'source', ''), 'Not recorded') AS source
+              coalesce(nullif(payload ->> 'source', ''),
+                       nullif(payload ->> 'sourcePath', ''),
+                       'Not recorded') AS source
          FROM metric_events
         WHERE event = 'inquiry_received' AND case_id IS NOT NULL
      ),

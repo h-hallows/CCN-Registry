@@ -97,10 +97,48 @@ function hash(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
-/** The origin the link points at. The portals are paths on one host, not subdomains. */
+/**
+ * The origin the link points at. The portals are paths on one host, not subdomains.
+ *
+ * FAILS CLOSED ON A DEPLOYMENT, for the same reason `DATABASE_URL` and the mail driver
+ * do. With neither variable set this used to fall back to `http://localhost:3003`, and
+ * on a deployed console that is not a broken link — it is worse than one, because
+ * nothing else about the grant fails. A user row is written, a membership row, a hashed
+ * single-use token with a seven day life, and an audit entry stating that this family
+ * was given access to their own screen. Every part of that is true except the part that
+ * decides whether it happened: the address handed to them resolves to their own machine.
+ *
+ * The compliance record would then say a household was let in on a day on which nobody
+ * could have let them in, and an entry that is false in the only way that matters is
+ * precisely what § 1812.529 exists to keep out of a log. So refuse.
+ *
+ * What keeps the refusal out of the record is the transaction rolling back, not where
+ * this is called from; a throw from inside it would leave nothing behind either. Callers
+ * resolve it at the top anyway so that the refusal arrives before any database work and
+ * reads as a missing setting rather than as a database that is unwell.
+ *
+ * Outside production the default stands. There is nowhere else for a local link to point.
+ */
 export function portalOrigin(): string {
-  return (process.env.PORTAL_URL ?? process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3003')
-    .replace(/\/+$/, '');
+  /*
+   * First non-blank, not `??`. A variable that exists and is empty is the ordinary way
+   * one is mis-set — a Vercel field saved blank, a `PORTAL_URL=` line in an env file —
+   * and `??` passes an empty string through as a value, so the documented fallback to
+   * NEXT_PUBLIC_SITE_URL was unreachable in exactly the case it was there for.
+   */
+  const configured = [process.env.PORTAL_URL, process.env.NEXT_PUBLIC_SITE_URL]
+    .map((value) => value?.trim())
+    .find((value) => value);
+  if (configured) return configured.replace(/\/+$/, '');
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new AccessError(
+      'Portal links are unavailable on this deployment: neither PORTAL_URL nor '
+      + 'NEXT_PUBLIC_SITE_URL is set, so there is no address to send anyone to. Set '
+      + "PORTAL_URL to the public site's origin and try again. Nothing was recorded.",
+    );
+  }
+  return 'http://localhost:3003';
 }
 
 export interface PortalUser {
@@ -236,6 +274,12 @@ export async function grantPortalAccess(
   if (!email.includes('@')) throw new AccessError('That is not an email address.');
   if (displayName.length < 2) throw new AccessError('Give the person a name.');
 
+  /*
+   * Before the transaction, deliberately. A link nobody can open is not a link, and a
+   * row saying one was issued is a false entry — see `portalOrigin`.
+   */
+  const origin = portalOrigin();
+
   const handle = await getDb();
   return handle.transaction(async (tx) => {
     const [subject] = await tx.query<{ name: string }>(
@@ -341,7 +385,7 @@ export async function grantPortalAccess(
 
     return {
       userId,
-      url: `${portalOrigin()}/invite/${token}`,
+      url: `${origin}/invite/${token}`,
       expiresAt: invite.expires_at,
       existing,
       kind: input.kind,
@@ -355,6 +399,9 @@ export async function reissuePortalLink(
   ctx: AuditContext,
   userId: string,
 ): Promise<GrantResult> {
+  // Before the transaction, for the reason given on `portalOrigin`.
+  const origin = portalOrigin();
+
   const handle = await getDb();
   return handle.transaction(async (tx) => {
     const [user] = await tx.query<{
@@ -413,7 +460,7 @@ export async function reissuePortalLink(
 
     return {
       userId,
-      url: `${portalOrigin()}/invite/${token}`,
+      url: `${origin}/invite/${token}`,
       expiresAt: invite.expires_at,
       existing: true,
       kind: user.role,

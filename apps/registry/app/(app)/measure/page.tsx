@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { requireOperator } from '@/lib/operator';
 import {
-  bySource, capacity, failures, funnel, leakage,
+  bySource, capacity, failures, funnel, leakage, partnerPopulation,
   type FunnelRow, type LeakageRow, type Trend,
 } from '@/lib/queries/measure';
 import { SERVICE_FAILURE_LABEL } from '@/lib/metrics';
@@ -136,12 +136,19 @@ function LeakageLine({ row }: { row: LeakageRow }) {
 export default async function MeasurePage() {
   const { ctx } = await requireOperator();
 
-  const [steps, sources, cap, hours, failed] = await Promise.all([
+  const [steps, sources, cap, hours, failed, partners] = await Promise.all([
     funnel(ctx),
     bySource(ctx),
     capacity(ctx),
     leakage(ctx),
     failures(ctx),
+    /*
+     * The partner figure, from the definition /partners owns. Imported rather than
+     * counted here: this screen printed three partner-looking rows while /partners
+     * printed nothing sent, and an operator compared the two. Whichever screen reports
+     * this number next gets it from the same call.
+     */
+    partnerPopulation(),
   ]);
 
   /*
@@ -233,6 +240,37 @@ export default async function MeasurePage() {
         title="Where the work comes from"
         blurb="§ 8 asks whether the binding constraint is demand or capacity. A channel that sends many and converts none is not the same problem as one that sends three and converts three."
       >
+        {/*
+          * The partner figure sits ABOVE the label table, and says what it is, because
+          * the two were read as one number. This screen showed three rows whose labels
+          * began "Partner:" while /partners showed nothing sent, and the difference was
+          * taken for a disagreement about how many partners exist. It was not: a source
+          * is operator free text and a partner referral is a foreign key. Both are now
+          * on the screen, each named, and the key comes from the module that owns it.
+          */}
+        <div className="grid gap-x-6 gap-y-3 border-b hair px-4 py-4 sm:grid-cols-3">
+          <div>
+            <span className="label">Partners on the list</span>
+            <p className="nums text-sm">{partners.partners}</p>
+          </div>
+          <div>
+            <span className="label">Families attributed to one by record</span>
+            <p className="nums text-sm">{partners.referrals}</p>
+          </div>
+          <div>
+            <span className="label">Of those, on the books</span>
+            <p className="nums text-sm">{partners.became}</p>
+          </div>
+        </div>
+        <p className="border-b hair px-4 py-2.5 text-xs leading-relaxed"
+          style={{ color: 'var(--ink-faint)' }}>
+          Those three are the figures on Partners, read from the same place, so the two
+          screens cannot part company. The table below is something else: a source is a
+          label recorded on the enquiry, not a link to anybody, and nothing checks it
+          against the partner list. A row reading &ldquo;Partner&rdquo; is what somebody
+          typed — it is not evidence that a named partner sent that family, and it
+          grants no partner the right to read the outcome.
+        </p>
         {sources.length === 0 ? (
           <Empty>No enquiry has recorded a source yet.</Empty>
         ) : (
@@ -240,7 +278,12 @@ export default async function MeasurePage() {
             <table className="w-full">
               <thead>
                 <tr className="text-left">
-                  <th className="px-4 py-2">Source</th>
+                  <th className="px-4 py-2">
+                    Source label, as recorded
+                    <span className="ml-1.5 normal-case" style={{ opacity: 0.7 }}>
+                      (typed, not keyed)
+                    </span>
+                  </th>
                   <th className="px-4 py-2">Enquiries</th>
                   <th className="px-4 py-2">Reached a referral</th>
                   <th className="px-4 py-2" />

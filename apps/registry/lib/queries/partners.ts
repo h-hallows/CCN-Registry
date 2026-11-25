@@ -16,6 +16,100 @@ import { audit, auditRead, type AuditContext } from '@/lib/audit';
 
 export class PartnerError extends Error {}
 
+/**
+ * THE ONE DEFINITION of a family a referral partner sent us. Written here and nowhere
+ * else, and imported by every screen that reports the figure.
+ *
+ * The attribution is a FOREIGN KEY, and it is load-bearing for a reason that has nothing
+ * to do with reporting: `partner_referrals()` is scoped by it, so the key is what
+ * decides who may read a referral and, once the household consents, its outcome. The
+ * free-text source line typed on an enquiry decides nothing and is not this.
+ *
+ * THE KEY IS WRITTEN IN TWO PLACES, and that is how /partners and /measure came to
+ * disagree in front of an operator. The front door writes `inquiries.partner_id`;
+ * `convertInquiry` copies it onto `households.partner_id`, which is the record that
+ * outlives the enquiry leaving the queue. This query read the first and never the
+ * second, so a partner the household records credit with three families showed nothing
+ * sent at all on the one screen that owns referral partners.
+ *
+ * So a family is counted ONCE, keyed by the household where there is one and by the
+ * enquiry where there is not. Counting the two tables separately and adding them would
+ * double every referral that converted. And `deleted_at` is applied to both legs rather
+ * than to one: a predicate on one leg of a union and not the other is how two counts of
+ * the same fact drift apart without anybody changing a definition.
+ */
+export const PARTNER_REFERRALS_CTE = `
+  partner_referrals AS (
+    SELECT partner_id, family,
+           bool_or(became) AS became,
+           min(at)         AS sent_at
+      FROM (
+        /*
+         * What the front door recorded. A household that has since been soft-deleted
+         * leaves the enquiry counted as sent — they did send it — and not counted as a
+         * household on the books, which is why the join decides "became" rather than
+         * household_id IS NOT NULL deciding it.
+         */
+        SELECT i.partner_id,
+               coalesce(h.id::text, 'inquiry:' || i.id::text) AS family,
+               (h.id IS NOT NULL)                             AS became,
+               i.received_at                                  AS at
+          FROM inquiries i
+          LEFT JOIN households h
+            ON h.id = i.household_id AND h.deleted_at IS NULL
+         WHERE i.partner_id IS NOT NULL
+        UNION ALL
+        -- And what the household record holds, which outlives the enquiry.
+        SELECT hh.partner_id, hh.id::text, true, hh.created_at
+          FROM households hh
+         WHERE hh.partner_id IS NOT NULL AND hh.deleted_at IS NULL
+      ) recorded
+     GROUP BY partner_id, family
+  )`;
+
+export interface PartnerPopulation {
+  /**
+   * Everybody on the referral-partner list.
+   *
+   * Unfiltered, and that is a fact about the table rather than an omission:
+   * `referral_partners` has no status and no `deleted_at`, so a partner is on the list
+   * or is not on it. If either is ever added, this is the single place that has to
+   * learn about it.
+   */
+  partners: number;
+  /** Families attributed to one of them by key, each counted once. */
+  referrals: number;
+  /** Of those, how many are a household on the books now. */
+  became: number;
+}
+
+/**
+ * The partner figures as one read, for every screen that reports one.
+ *
+ * /partners reports them in its header and /measure reports the referral figure beside
+ * its table of typed source labels, so an operator comparing the two screens is
+ * comparing one definition with itself. No `AuditContext`: these are three counts and
+ * they name nobody, the same as `countUnhandledInquiries`, and the screens that call it
+ * audit their own read.
+ *
+ * The rule that stops a fourth screen computing its own is asserted in
+ * tests/partners.test.ts, which forbids `FROM referral_partners` outside this module.
+ */
+export async function partnerPopulation(): Promise<PartnerPopulation> {
+  const { query } = await getDb();
+  const [row] = await query<{ partners: string; referrals: string; became: string }>(
+    `WITH ${PARTNER_REFERRALS_CTE}
+     SELECT (SELECT count(*) FROM referral_partners)::text              AS partners,
+            (SELECT count(*) FROM partner_referrals)::text              AS referrals,
+            (SELECT count(*) FROM partner_referrals WHERE became)::text AS became`,
+  );
+  return {
+    partners: Number(row!.partners),
+    referrals: Number(row!.referrals),
+    became: Number(row!.became),
+  };
+}
+
 export interface PartnerRow {
   id: string;
   name: string;
@@ -25,9 +119,9 @@ export interface PartnerRow {
   email: string | null;
   notes: string | null;
   createdAt: string;
-  /** Inquiries attributed to them, ever. */
+  /** Families attributed to them, ever, however the attribution was recorded. */
   sent: number;
-  /** Of those, how many the operator converted into a household. */
+  /** Of those, how many are a household on the books. */
   became: number;
   /** The most recent one, so a quiet partner is visible as quiet. */
   lastSentAt: string | null;
@@ -44,19 +138,39 @@ export async function listPartners(ctx: AuditContext): Promise<PartnerRow[]> {
     created_at: string; sent: string; became: string; last_sent_at: string | null;
     accounts: string; revoked_accounts: string;
   }>(
-    `SELECT p.id, p.name, p.org, p.role, p.phone, p.email, p.notes, p.created_at::text,
+    `WITH ${PARTNER_REFERRALS_CTE}
+     SELECT p.id, p.name, p.org, p.role, p.phone, p.email, p.notes, p.created_at::text,
             coalesce(i.sent, 0)::text   AS sent,
             coalesce(i.became, 0)::text AS became,
-            i.last_sent_at::text,
+            /*
+             * CALIFORNIA'S DATE, not the server's. This column renders through
+             * shortDate(), which reads the leading YYYY-MM-DD off the string, and a
+             * timestamptz casts to text in UTC. From late afternoon Pacific onwards
+             * that is tomorrow, so a partner who sent a family this evening was dated
+             * as having sent it the day after — on the screen whose whole job is to
+             * show whether a partner has gone quiet. Nothing caught it because the seed
+             * writes no inquiries, so this column was null on every row and the
+             * formatting was never once exercised. Fourth instance of this bug in this
+             * repository; the other three are named in lib/queries/measure.ts and
+             * V1-REVIEW § 2.
+             */
+            (i.last_sent_at AT TIME ZONE 'America/Los_Angeles')::date::text
+              AS last_sent_at,
             coalesce(a.accounts, 0)::text         AS accounts,
             coalesce(a.revoked_accounts, 0)::text AS revoked_accounts
        FROM referral_partners p
        LEFT JOIN (
+         /*
+          * Aggregated from the shared definition above rather than from inquiries
+          * directly. A per-partner count and the screen-level total have to be the same
+          * arithmetic over the same rows, or the card and the header disagree — which
+          * is the smaller version of the defect this whole query was changed to fix.
+          */
          SELECT partner_id,
-                count(*)                                      AS sent,
-                count(*) FILTER (WHERE household_id IS NOT NULL) AS became,
-                max(received_at)                              AS last_sent_at
-           FROM inquiries WHERE partner_id IS NOT NULL GROUP BY partner_id
+                count(*)                       AS sent,
+                count(*) FILTER (WHERE became) AS became,
+                max(sent_at)                   AS last_sent_at
+           FROM partner_referrals GROUP BY partner_id
        ) i ON i.partner_id = p.id
        LEFT JOIN (
          SELECT pu.partner_id,

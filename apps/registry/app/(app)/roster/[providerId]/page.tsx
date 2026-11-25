@@ -4,9 +4,15 @@ import type { CareType } from '@h-hallows/core/schema';
 import { requireOperator } from '@/lib/operator';
 import { asDate, asTimestamp, getProviderWithStanding } from '@/lib/queries/providers';
 import { getDb } from '@h-hallows/core/db';
-import { LABEL, requiredFor } from '@h-hallows/core/domain';
+import { AREAS, areaLabel, LABEL, requiredFor } from '@h-hallows/core/domain';
 import { civilLA, formatISODate } from '@h-hallows/core/domain';
-import { setReferralStatusAction, upsertCredentialAction } from '@/app/(app)/actions';
+import {
+  recordProviderFactsAction, recordStatedRateAction, setReferralStatusAction,
+  upsertCredentialAction,
+} from '@/app/(app)/actions';
+import {
+  AVAILABILITY_BLOCKS, PROVIDER_TYPES, SHIFT_BLOCKS, SHIFT_DAYS,
+} from '@/lib/queries/providerEdits';
 import { portalUsersFor } from '@/lib/domain/portalAccess';
 import { documentsFor } from '@/lib/queries/documents';
 import { Documents } from '@/components/Documents';
@@ -129,6 +135,248 @@ export default async function ProviderPage({
             <span className="nums">{formatBlocks(provider.availability)}</span>
           </Field>
           {provider.notes ? <Field label="Internal notes" wide>{provider.notes}</Field> : null}
+        </div>
+
+        <div className="border-t hair px-4 py-4">
+          {/*
+            * WHY THIS FORM EXISTS AT ALL. Everything above it was read-only, and six of
+            * those fields are the ones `screenCase` reads: the type and whether they
+            * drive decide which credentials § 3.3 requires, and the areas and the shifts
+            * decide which households the filters will offer them to. `/applications`
+            * creates the row and nothing could correct it afterwards, so an admitted
+            * provider could be left unreferable with no console path to fix it.
+            *
+            * Collapsed, like the referral-status write below it, because the record is
+            * what this screen is for and the form is what you reach for when the record
+            * is wrong.
+            */}
+          <Disclose summary="Correct these facts — these are the ones the match filters read">
+            <ActionForm
+              action={recordProviderFactsAction}
+              submitLabel="Record these facts"
+              confirm={'These are the facts the match filters read. A change can take '
+                + 'this provider off every shortlist, including on a case they are '
+                + 'standing on — no engagement is ended either way. Continue?'}
+            >
+              <input type="hidden" name="providerId" value={provider.id} />
+
+              <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div>
+                  <label className="label" htmlFor="type">Type</label>
+                  <select id="type" name="type" className="select" defaultValue={provider.type}>
+                    {PROVIDER_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                  <p className="mt-1 text-[0.6875rem]" style={{ color: 'var(--ink-faint)' }}>
+                    Decides which credentials are required and which care types they are
+                    referred for.
+                  </p>
+                </div>
+                <div>
+                  <label className="label" htmlFor="transports">Drives clients</label>
+                  <select id="transports" name="transports" className="select"
+                    defaultValue={provider.transports ? 'yes' : 'no'}>
+                    <option value="no">No</option>
+                    <option value="yes">Yes</option>
+                  </select>
+                  <p className="mt-1 text-[0.6875rem]" style={{ color: 'var(--ink-faint)' }}>
+                    Yes also requires auto insurance and a driver’s licence on file.
+                  </p>
+                </div>
+                <div>
+                  <label className="label" htmlFor="maxTravelMin">Travels up to (minutes)</label>
+                  <input id="maxTravelMin" name="maxTravelMin" type="number" min="1" max="240"
+                    className="input" defaultValue={provider.maxTravelMin ?? ''} />
+                </div>
+                <div>
+                  <label className="label" htmlFor="preferredName">Goes by</label>
+                  <input id="preferredName" name="preferredName" className="input"
+                    defaultValue={provider.preferredName ?? ''} autoComplete="off" />
+                </div>
+                <div>
+                  <label className="label" htmlFor="phone">Phone</label>
+                  <input id="phone" name="phone" className="input"
+                    defaultValue={provider.phone ?? ''} autoComplete="off" />
+                </div>
+                <div>
+                  <label className="label" htmlFor="email">Email</label>
+                  <input id="email" name="email" className="input"
+                    defaultValue={provider.email ?? ''} autoComplete="off" />
+                </div>
+              </div>
+
+              {/*
+                * EVERY CURRENT VALUE RENDERS TICKED, including one that is not in the
+                * vocabulary. The save is a replace, so an area an operator typed —
+                * `src/domain/areas.ts` is explicit that recording a household two
+                * streets outside the usual patch matters more than a tidy list — would
+                * be dropped by a form built from the vocabulary alone. That is the same
+                * mistake `standingAlternates` exists to prevent one screen along.
+                */}
+              <fieldset className="mt-4">
+                <legend className="label">Areas they cover</legend>
+                <p className="mb-2 text-[0.6875rem]" style={{ color: 'var(--ink-faint)' }}>
+                  Matched against the household’s area by exact text, and the first one
+                  ticked is the one the match screen ranks as their own patch.
+                </p>
+                <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-4">
+                  {areaChoices(provider.areas).map((area) => (
+                    <label key={area} className="flex items-start gap-1.5 text-sm">
+                      <input type="checkbox" name="areas" value={area} className="mt-0.5"
+                        defaultChecked={provider.areas.includes(area)} />
+                      <span>{area}</span>
+                    </label>
+                  ))}
+                </div>
+                <input name="areas" className="input mt-2"
+                  placeholder="Somewhere else — write it as a person would, and separate several with commas"
+                  autoComplete="off" />
+              </fieldset>
+
+              {/*
+                * A closed vocabulary, offered as boxes rather than typed, because
+                * `overlap` compares these strings to the case's requested pattern by set
+                * membership — so `Mon:am` is not a near miss, it is a value that matches
+                * no case for as long as it is on the record. The writer refuses one
+                * anyway; this is so the operator never produces one.
+                */}
+              <fieldset className="mt-4">
+                <legend className="label">Shifts they have said they can work</legend>
+                <p className="mb-2 text-[0.6875rem]" style={{ color: 'var(--ink-faint)' }}>
+                  AM 07–15, PM 15–23, NOC 23–07. A provider with nothing ticked is
+                  offered for no case that states a pattern — and onboarding ticks none.
+                </p>
+                <div className="scroller">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Day</th>
+                        {SHIFT_BLOCKS.map((b) => <th key={b}>{b}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {SHIFT_DAYS.map((day) => (
+                        <tr key={day}>
+                          <td className="font-medium">{day}</td>
+                          {SHIFT_BLOCKS.map((block) => {
+                            const slot = `${day}:${block}`;
+                            return (
+                              <td key={block}>
+                                <label className="flex items-center gap-1.5">
+                                  <input type="checkbox" name="availability" value={slot}
+                                    defaultChecked={provider.availability.includes(slot)} />
+                                  <span className="sr-only">{`${day} ${block}`}</span>
+                                </label>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </fieldset>
+
+              <div className="mt-4 grid gap-x-4 gap-y-3 sm:grid-cols-2">
+                <div>
+                  <label className="label" htmlFor="languages">Languages</label>
+                  <input id="languages" name="languages" className="input"
+                    defaultValue={provider.languages.join(', ')} autoComplete="off"
+                    placeholder="English, Spanish" />
+                  <p className="mt-1 text-[0.6875rem]" style={{ color: 'var(--ink-faint)' }}>
+                    Separate with commas. Matched against the household’s stated
+                    preference, which never excludes anybody.
+                  </p>
+                </div>
+                <div>
+                  <label className="label" htmlFor="specialties">Specialties</label>
+                  <input id="specialties" name="specialties" className="input"
+                    defaultValue={provider.specialties.join(', ')} autoComplete="off"
+                    placeholder="post_surgical, wound_care" />
+                  <p className="mt-1 text-[0.6875rem]" style={{ color: 'var(--ink-faint)' }}>
+                    Written the way the needs list writes them, with underscores — the
+                    match screen counts the overlap, so a spelling that differs counts
+                    as no overlap.
+                  </p>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="label" htmlFor="restrictions">
+                    What they have said they will not do — § 1812.5095(b)(2)
+                  </label>
+                  <input id="restrictions" name="restrictions" className="input"
+                    defaultValue={provider.restrictions ?? ''} autoComplete="off" />
+                  <p className="mt-1 text-[0.6875rem]" style={{ color: 'var(--ink-faint)' }}>
+                    Their words, shown to the household beside their name.
+                  </p>
+                </div>
+              </div>
+            </ActionForm>
+          </Disclose>
+        </div>
+      </Section>
+
+      <Section
+        title="The rate they stated"
+        blurb="Their figure, in their words. The registry does not set it, suggest it, cap it or take a share of it — our fee is charged to the household as a percentage of the job."
+      >
+        <div className="px-4 py-4">
+          <Field label="On the record">
+            <Rate hourly={provider.rateHourly} notes={provider.rateNotes} />
+          </Field>
+
+          {/*
+            * I5, § 1812.5095(b)(3), § 1812.530 and § 1812.531. No default, no range, no
+            * suggestion, no cap — every one of those would be this registry setting a
+            * rate it has no business setting, and § 1812.530 and § 1812.531 are the
+            * reason it has none: it may not charge a nurse anything and may not take a
+            * share of what she charges. The provider's own screen at `/pro/rate` writes
+            * the same column from their own session. This is here because most of the
+            * roster has no portal account and states a rate down a telephone, and the
+            * confirmation is what keeps a transcription from reading, afterwards, like
+            * the registry's own figure.
+            */}
+          <div className="mt-4">
+            <Disclose summary="Record what they said">
+              <ActionForm
+                action={recordStatedRateAction}
+                submitLabel="Record the stated rate"
+                confirm={'Record this as the rate the provider stated? It is shown to '
+                  + 'households beside their name and stays negotiable with them. '
+                  + 'Continue?'}
+              >
+                <input type="hidden" name="providerId" value={provider.id} />
+                <div className="grid gap-x-4 gap-y-3 sm:grid-cols-3">
+                  <div>
+                    <label className="label" htmlFor="rateHourly">Their hourly rate</label>
+                    <input id="rateHourly" name="rateHourly" type="text" inputMode="decimal"
+                      className="input nums" defaultValue={provider.rateHourly ?? ''}
+                      autoComplete="off" />
+                    <p className="mt-1 text-[0.6875rem]" style={{ color: 'var(--ink-faint)' }}>
+                      Leave it empty if they would rather talk about it. That is a normal
+                      answer and we say so when they are put forward.
+                    </p>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="label" htmlFor="rateNotes">
+                      Anything they want said alongside it
+                    </label>
+                    <input id="rateNotes" name="rateNotes" className="input"
+                      defaultValue={provider.rateNotes ?? ''} autoComplete="off"
+                      placeholder="Overnights are different — happy to discuss." />
+                  </div>
+                </div>
+                {/* Un-prechecked, like the § 1812.5095(f) confirmation on the referral,
+                    and for the same reason: it asserts something that happened outside
+                    the software, so it has to be made rather than assumed. */}
+                <label className="mt-3 flex items-start gap-2 text-sm">
+                  <input type="checkbox" name="stated" value="yes" required className="mt-0.5" />
+                  <span>
+                    The provider stated this figure. Nothing in this registry set it,
+                    suggested it or takes a share of it.
+                  </span>
+                </label>
+              </ActionForm>
+            </Disclose>
+          </div>
         </div>
       </Section>
 
@@ -355,6 +603,22 @@ export default async function ProviderPage({
       </Section>
     </>
   );
+}
+
+/**
+ * The boxes to offer for areas: the vocabulary, then anything this provider already has
+ * that is not in it.
+ *
+ * The second half is the part that matters. `providers.areas` is free text on purpose,
+ * the save is a replace, and a form offering only the canonical nine would render an
+ * operator-typed area unticked — so saving the form would quietly stop serving a
+ * household two streets outside the usual patch.
+ */
+function areaChoices(current: readonly string[]): string[] {
+  return [...new Set([
+    ...AREAS.filter((slug) => slug !== 'other').map((slug) => areaLabel(slug)),
+    ...current,
+  ])];
 }
 
 function dateOrGap(iso: string | null) {

@@ -6,11 +6,13 @@
  * those but this. So the refusals here are the whole of the access control, and each one
  * below is constructed to fail if its rule were removed.
  */
-import { beforeAll, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { DbHandle } from '@h-hallows/core/db';
 import { expectRejection, seededDb, TEST_CTX } from '@h-hallows/core/testing';
+import type { GrantResult } from '@/lib/domain/portalAccess';
 import {
-  AccessError, grantPortalAccess, portalUsersFor, reissuePortalLink,
+  AccessError, grantPortalAccess, portalOrigin, portalUsersFor, reissuePortalLink,
   restorePortalAccess, revokePortalAccess,
 } from '@/lib/domain/portalAccess';
 
@@ -393,5 +395,162 @@ describe('listing who can sign in', () => {
     });
     const theirs = await portalUsersFor(TEST_CTX, 'household', second);
     expect(theirs.some((u) => u.email === email)).toBe(false);
+  });
+});
+
+/*
+ * WHERE THE LINK POINTS, WHICH DECIDES WHETHER IT IS A LINK AT ALL.
+ *
+ * `portalOrigin` fell back to `http://localhost:3003` when neither variable was set.
+ * On a deployment every other part of a grant still succeeded — the account, the
+ * membership, the hashed token, and an audit row saying this family was given access —
+ * so the console reported a household let in, the log recorded it, and the address in
+ * their hands pointed at their own machine. The failure had no symptom on this side.
+ *
+ * STATED AS A RULE RATHER THAN AS THE TWO INSTANCES. Every function here that hands
+ * back a `GrantResult` hands back a URL somebody is expected to open, so each one has
+ * to refuse when the deployment cannot say what that URL is. The issuers are read out
+ * of the source, so the third one — a bulk invite, a re-send from the household
+ * screen — is covered by this suite on the day it is written rather than the day
+ * somebody notices.
+ */
+describe('a portal link is never issued pointing at a host nobody can reach', () => {
+  const source = readFileSync(
+    new URL('../lib/domain/portalAccess.ts', import.meta.url), 'utf8',
+  );
+
+  /** Every exported function that promises a GrantResult, named by the source itself. */
+  function issuersInSource(): string[] {
+    return [...source.matchAll(
+      /export async function (\w+)\([^)]*\): Promise<GrantResult>/g,
+    )].map((m) => m[1]!).sort();
+  }
+
+  interface Attempt { email: string; run: () => Promise<GrantResult> }
+
+  /*
+   * Each entry prepares itself in a normal environment and then hands back the one call
+   * that must refuse. Preparation has to happen first: reissuing needs an account, and
+   * an account cannot be created once the environment under test refuses to create one.
+   */
+  const issuers: { name: string; prepare: () => Promise<Attempt> }[] = [
+    {
+      name: 'grantPortalAccess',
+      prepare: async () => {
+        const subjectId = await aHousehold();
+        const email = freshEmail();
+        return {
+          email,
+          run: () => grantPortalAccess(TEST_CTX, {
+            kind: 'household', subjectId, email, displayName: 'Imani Stead',
+          }),
+        };
+      },
+    },
+    {
+      name: 'reissuePortalLink',
+      prepare: async () => {
+        const email = freshEmail();
+        const granted = await grantPortalAccess(TEST_CTX, {
+          kind: 'household', subjectId: await aHousehold(), email,
+          displayName: 'Imani Stead',
+        });
+        return { email, run: () => reissuePortalLink(TEST_CTX, granted.userId) };
+      },
+    },
+  ];
+
+  function unconfiguredProduction(): void {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('PORTAL_URL', '');
+    vi.stubEnv('NEXT_PUBLIC_SITE_URL', '');
+  }
+
+  const invitesFor = async (email: string) => Number(
+    (await db.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM portal_invites WHERE email = $1`, [email],
+    ))[0]!.n,
+  );
+  const auditRows = async () => Number(
+    (await db.query<{ n: string }>(`SELECT count(*)::text AS n FROM audit_log`))[0]!.n,
+  );
+
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  it('has a case below for every issuer in the module', () => {
+    expect(
+      issuers.map((i) => i.name).sort(),
+      'a function returning a GrantResult was added to lib/domain/portalAccess.ts and '
+      + 'this suite does not cover it. Add it to `issuers` above — the point of reading '
+      + 'the names out of the source is that a new issuer cannot arrive unnoticed.',
+    ).toEqual(issuersInSource());
+  });
+
+  for (const issuer of issuers) {
+    it(`${issuer.name} refuses, and says which variable to set`, async () => {
+      const attempt = await issuer.prepare();
+      unconfiguredProduction();
+
+      /*
+       * The variable is named in the matcher rather than in a second assertion: the
+       * operator reading this message is the only person who can set it, so a refusal
+       * that does not name it is the wrong refusal, not merely a terse one.
+       */
+      const message = await expectRejection(attempt.run, /PORTAL_URL/);
+      expect(
+        message,
+        'the refusal offered localhost as though it were an answer',
+      ).not.toMatch(/localhost/);
+    });
+
+    it(`${issuer.name} writes nothing at all when it refuses`, async () => {
+      const attempt = await issuer.prepare();
+      const invitesBefore = await invitesFor(attempt.email);
+      const auditBefore = await auditRows();
+
+      unconfiguredProduction();
+      await expectRejection(attempt.run, /PORTAL_URL/);
+
+      expect(
+        await invitesFor(attempt.email),
+        'a token was minted for a link that could not be delivered',
+      ).toBe(invitesBefore);
+      expect(
+        await auditRows(),
+        'the append-only log gained a row saying access was given, and it was not — '
+        + 'a false entry in the one record that cannot be corrected afterwards',
+      ).toBe(auditBefore);
+    });
+  }
+
+  it('still points at the dev server outside production', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('PORTAL_URL', '');
+    vi.stubEnv('NEXT_PUBLIC_SITE_URL', '');
+    expect(
+      portalOrigin(),
+      'local development has nowhere else for a link to point, and a guard that broke '
+      + 'it would be worked around rather than fixed',
+    ).toBe('http://localhost:3003');
+  });
+
+  it('uses what is configured, in production, without a trailing slash', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('PORTAL_URL', 'https://care.example.com/');
+    expect(portalOrigin()).toBe('https://care.example.com');
+  });
+
+  it('accepts the site URL as the fallback it is documented to be', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('PORTAL_URL', '');
+    vi.stubEnv('NEXT_PUBLIC_SITE_URL', 'https://care.example.com');
+    expect(portalOrigin()).toBe('https://care.example.com');
+  });
+
+  it('treats blank as unset, since a blank variable is how one is usually mis-set', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('PORTAL_URL', '   ');
+    vi.stubEnv('NEXT_PUBLIC_SITE_URL', '');
+    expect(() => portalOrigin()).toThrow(AccessError);
   });
 });
