@@ -45,6 +45,26 @@ their feedback lands on the case.
 
 No domain purchased. No wordmark drawn.
 
+## Owed to this repository
+
+**Every write button in this console is gated by something no test can drive.** The
+native `window.confirm` that used to gate them was replaced with an in-page confirmation
+in `components/ActionForm.tsx`, specifically so the write surface would be reachable to
+verification — `type="button"` until asked, `data-confirm` / `data-confirm-accept` /
+`data-confirm-cancel` hooks, implicit submit blocked on Enter, `role="alertdialog"`. The
+gate is well built for testability and **still untested**: `apps/registry/vitest.config.ts`
+sets `environment: 'node'` and there is no `jsdom`, `happy-dom` or `@testing-library` in
+`node_modules`, so nothing in the suite can click it. The claim made when that shipped —
+that the write surface is now reachable to verification — is true of a browser and remains
+untrue of the suite, which is the same shape of gap the change set out to close.
+
+Deliberately not done on launch day: it means a new devDependency and a `vitest.config.ts`
+change in the repository whose CI had never once run until this morning, for a test-only
+gain, while the thing actually blocking V1 is a Postgres. The low-risk shape when it is
+done: per-file environment (`// @vitest-environment happy-dom` in the one new test, or
+`environmentMatchGlobs`) rather than switching the whole suite off `node`, so the other
+456 tests keep the environment they pass under.
+
 ## Owed to core
 
 Two migrations, both deliberately not taken here because they belong in the database
