@@ -36,8 +36,30 @@ jobs:
       # package.json says, and CI has no SSH key. This makes git use https for
       # github.com regardless, so `npm ci` resolves @h-hallows/core from the public
       # repository with no credentials at all. Harmless if npm ever stops doing it.
+      # A BLOCK SCALAR, AND THAT IS THE WHOLE POINT OF THIS STEP'S SHAPE.
+      #
+      # This was a plain scalar: `run: git config … insteadOf git@github.com:`. A plain
+      # YAML scalar cannot end in a colon — the parser reads the trailing `:` as a
+      # mapping indicator and gives up with "mapping values are not allowed in this
+      # context", at this column, in both repositories.
+      #
+      # WHAT THAT MEANT. GitHub could not parse the workflow, so it never created a
+      # single job or check run: every push since this line was written reported a red
+      # run with `total_count: 0` jobs, and the API reported the workflow's name as its
+      # own file path, which is the fallback for a workflow that would not load. So every
+      # invariant this project describes as "enforced in CI" — the copy lint, the brand
+      # lint, the typecheck, the suite, the suite again against a real Postgres 16, the
+      # build, the one-owner check on migrations — has only ever been enforced on
+      # somebody's laptop. The comment below, which explains why an earlier credential
+      # configuration "could never have worked" and that "the build passed for a reason
+      # unrelated to the configuration", was describing a build that did not run.
+      #
+      # `|` takes everything indented beneath it literally, so the colon is just a
+      # character. Quoting would also work; a block scalar cannot be broken by the next
+      # thing somebody appends to the command.
       - name: Resolve github git dependencies over https
-        run: git config --global url."https://github.com/".insteadOf git@github.com:
+        run: |
+          git config --global url."https://github.com/".insteadOf git@github.com:
 
       - run: npm ci
 

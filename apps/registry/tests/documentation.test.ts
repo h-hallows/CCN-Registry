@@ -312,3 +312,69 @@ describe('every file the documentation names is there', () => {
     ).toEqual([]);
   });
 });
+
+describe('the gate that says it checks can actually load', () => {
+  /*
+   * THE DEFECT THIS RULE IS ABOUT, AND IT IS THE LARGEST ONE IN EITHER REPOSITORY.
+   *
+   * `.github/workflows/ci.yml` carried the line
+   *
+   *     run: git config --global url."https://github.com/".insteadOf git@github.com:
+   *
+   * as a plain scalar. A plain YAML scalar may not end in a colon: the parser reads the
+   * trailing `:` as a mapping indicator and stops with "mapping values are not allowed
+   * in this context". GitHub could therefore not load the workflow, and a workflow that
+   * does not load produces a red run with ZERO jobs and zero check runs — the API even
+   * reports its name as its own file path, which is the fallback for one that would not
+   * parse. Both repositories had it, at the same column.
+   *
+   * So every invariant this project describes as enforced in CI had only ever been
+   * enforced on a laptop: the copy lint, the brand lint, the typecheck, the suite, the
+   * suite again against a real Postgres 16, the build, the one-owner check on
+   * migrations. Nothing was wrong with any of those steps. Nothing ran them.
+   *
+   * WHY THE RULE IS SHAPED THIS WAY. A real parse would be better and needs a YAML
+   * dependency neither repository has, for one file. So the hazard is named directly —
+   * an unquoted value ending in a colon — along with the gate's own contents, because
+   * the second half of this failure is that nobody could tell a workflow that runs
+   * nothing from a workflow that is not there. Asserting the step names means emptying
+   * the gate fails here instead of going quiet.
+   */
+  const WORKFLOW = '.github/workflows/ci.yml';
+  const workflow = read(join(REPO, WORKFLOW));
+
+  it('has no unquoted value ending in a colon', () => {
+    const offenders = workflow
+      .split('\n')
+      .map((line, i) => ({ line, n: i + 1 }))
+      .filter(({ line }) => {
+        const body = line.replace(/\s+$/, '');
+        if (body.trimStart().startsWith('#') || !body.endsWith(':')) return false;
+        // A key introducing a block is the normal case: `steps:`, `with:`, `- name:`.
+        // What cannot stand is a VALUE that ends in one.
+        const value = /^\s*(?:-\s*)?[A-Za-z_][\w.-]*:\s+(.*)$/.exec(body)?.[1];
+        if (value === undefined || value === '') return false;
+        return !(
+          (value.startsWith("'") && value.endsWith("':"))
+          || (value.startsWith('"') && value.endsWith('":'))
+        );
+      });
+    expect(
+      offenders.map((o) => `${WORKFLOW}:${o.n}`),
+      offenders.map((o) => o.line.trim()).join(' / ')
+      + ' — a plain YAML scalar cannot end in a colon, and GitHub answers by not '
+      + 'loading the workflow at all: a red run with no jobs. Use a `|` block scalar.',
+    ).toEqual([]);
+  });
+
+  it('still runs every gate it is supposed to run', () => {
+    for (const job of ['check', 'migrations-have-one-owner']) {
+      expect(workflow, `${WORKFLOW} no longer defines the ${job} job`)
+        .toContain(`\n  ${job}:`);
+    }
+    for (const script of ['lint:copy', 'lint:brand', 'typecheck', 'test']) {
+      expect(workflow, `${WORKFLOW} no longer runs npm run ${script}`)
+        .toMatch(new RegExp(`npm (?:run )?${script.replace(':', ':')}\\b`));
+    }
+  });
+});
