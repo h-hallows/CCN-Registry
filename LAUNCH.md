@@ -71,7 +71,24 @@ the site goes on serving what it was built with.
 | `RESEND_API_KEY` + `MAIL_FROM` | same two, same reason. |
 | `PORTAL_URL` | `https://ccn-external.vercel.app` — where a family, a nurse or a partner is sent when this console grants them access. On a production build it has **no default**: with neither this nor `NEXT_PUBLIC_SITE_URL` set, a grant refuses rather than minting a link to localhost, and refuses before writing anything. |
 
-## 4. Getting in before a mail domain is verified
+## 4. One secret that is not an environment variable — § 1812.533(c)
+
+In the **CCN-external repository on GitHub**, under Settings → Secrets and variables →
+Actions, add a secret called `DATABASE_URL` with the same pooled connection string.
+
+This is not the Vercel variable from step 2 and setting that one does not cover it. A
+website is an advertisement, § 1812.533(c) wants a record of every advertisement kept for
+a year, and the record is written by a CI job on every push to `main`. With no secret the
+job prints `No DATABASE_URL secret; skipping` and exits 0 — green, and nothing recorded.
+
+It is worth doing on the same day as the rest, because this is the one obligation in the
+system with no remedy. An assignment log entry can be filed late and say so. You cannot
+retrospectively advertise, and a record reconstructed from memory months afterwards is
+the false entry § 1812.533(b)(1) is about — so the console's advertising screen reports a
+hole and deliberately does not offer a button to fill it. Every deploy made before the
+secret exists is a day the trailing-year record cannot answer for.
+
+## 5. Getting in before a mail domain is verified
 
 `MAIL_FROM` needs a verified domain, which waits on the trading name, which waits on
 counsel. Until then mint a sign-in link yourself from a machine that can reach the
@@ -84,7 +101,7 @@ npm run operator:link
 Set `CONSOLE_URL` to stop typing the origin each time. `README.md`, "Getting in before
 mail is wired", has the detail.
 
-## 5. Check it
+## 6. Check it
 
 ```
 https://ccn-external.vercel.app/api/health
