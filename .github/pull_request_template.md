@@ -2,7 +2,7 @@
 
 <!-- one paragraph -->
 
-## Invariant check — `packages/core/INVARIANTS.md`
+## Invariant check — [`CCN-core/INVARIANTS.md`](https://github.com/h-hallows/CCN-core/blob/main/INVARIANTS.md)
 
 Confirm each. If any box is unchecked, say why in the paragraph below it.
 

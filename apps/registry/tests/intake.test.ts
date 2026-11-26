@@ -210,6 +210,71 @@ describe('turning one away', () => {
 });
 
 /**
+ * WHERE THE FAMILY CAME FROM, AND THE TWO DIFFERENT FACTS THAT ANSWERS.
+ *
+ * `inquiries.source_path` is which page the form was served at — the migration that
+ * added the column says so. `households.source` is the channel a family came through,
+ * written in words by whoever spoke to them: "Word of mouth", "Discharge planner
+ * referral", "VA social worker" are what the seed holds, and the case screen prints the
+ * column under one heading.
+ *
+ * Conversion used to copy the first into the second, so a household opened from the
+ * front door read "/refer" in the column next to "Word of mouth" on the household above
+ * it. Internally consistent, and an answer to a question nobody asked. Nothing caught it
+ * because no test read the column and the seed writes no enquiries, so every household
+ * that had one was seeded with a real label.
+ */
+describe('what the conversion records about where the family came from', () => {
+  it('does not write the page into the column that means the channel', async () => {
+    const id = await arrive({ source_path: '/refer' });
+    const result = await convertInquiry(TEST_CTX, { inquiryId: id, ...CONVERT });
+
+    const household = await one<{ source: string | null }>(
+      `SELECT source FROM households WHERE id = $1`, [result.householdId]);
+    expect(
+      household.source,
+      'households.source is the channel a family came through, and conversion put the '
+      + 'page the form was served at in it — "/refer" beside "Word of mouth" on the '
+      + 'case screen. It is null until somebody records a channel, which is true.',
+    ).toBeNull();
+  });
+
+  it('loses nothing by not copying it: the page is still answerable', async () => {
+    /*
+     * Not copying is only the right fix if the fact survives, and it does twice over —
+     * on the enquiry row, which is never edited and is joined by `household_id`, and in
+     * the case's own timeline, where it is a sentence rather than a column heading.
+     */
+    const id = await arrive({ source_path: '/refer' });
+    const result = await convertInquiry(TEST_CTX, { inquiryId: id, ...CONVERT });
+
+    const joined = await one<{ source_path: string }>(
+      `SELECT i.source_path FROM inquiries i WHERE i.household_id = $1`,
+      [result.householdId]);
+    expect(joined.source_path).toBe('/refer');
+
+    const entry = await one<{ body: string }>(
+      `SELECT body FROM timeline_entries WHERE case_id = $1 ORDER BY at LIMIT 1`,
+      [result.caseId]);
+    expect(entry.body).toContain('via /refer');
+  });
+
+  it('leaves no household anywhere whose channel is a page path', async () => {
+    /*
+     * THE RULE, not the instance. The assertions above would pass with a second writer
+     * putting `/contact` in the column tomorrow; this one is about the table. A channel
+     * is a thing somebody says, and nothing anybody says begins with a slash.
+     */
+    const offenders = await db.query<{ id: string; source: string }>(
+      `SELECT id, source FROM households WHERE source LIKE '/%'`);
+    expect(
+      offenders.map((r) => r.source),
+      'a page path is recorded as the channel on these households',
+    ).toEqual([]);
+  });
+});
+
+/**
  * The area a household is stored under.
  *
  * `cr_area` is compared to `providers.areas` by string equality. The public form

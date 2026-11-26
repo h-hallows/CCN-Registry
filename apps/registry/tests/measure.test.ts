@@ -481,14 +481,33 @@ describe('what the screens read', () => {
   });
 });
 
-describe('nothing in lib/metrics.ts is dead', () => {
+describe('nothing in the measurement modules is dead', () => {
   /*
    * The regression that matters. recordServiceFailure and recordMonthHours existed from
    * the first commit with no caller anywhere, so the two series § 8 calls load-bearing
    * were the two the console could not record — and every test passed, because there was
    * nothing to test. An exported measurement function with no caller is a measurement
    * nobody takes.
+   *
+   * AND THE SCAN THAT CHECKS IT HAD THE BLIND SPOT IT WAS LOOKING FOR. It read every
+   * file EXCEPT the one that defines the export, so a call a module makes to itself was
+   * invisible: a sweep written that way reported `trendOf` as an orphan when `leakage()`
+   * calls it at lib/queries/measure.ts and the page renders the result. Read from the
+   * other end, the same hole excuses a dead export the moment anything resembling a call
+   * to it appears in prose — a comment saying `recordMonthHours()` used to be called
+   * here keeps it alive forever.
+   *
+   * So the scan now: strips comments from every file first; includes the defining module
+   * in what it searches, with that module's own `function NAME` declarations removed so a
+   * definition is not mistaken for a call; and is itself tested against fixtures in both
+   * directions, below, rather than trusted.
+   *
+   * It covers exported FUNCTIONS, which is what "a measurement nobody takes" is about. A
+   * dead exported constant is a different and much smaller thing, and a scan for one
+   * would have to understand `SERVICE_FAILURE_LABEL[kind]`, which is not a call.
    */
+  const MODULES = ['lib/metrics.ts', 'lib/queries/measure.ts'];
+
   function sources(dir: string, out: string[] = []): string[] {
     for (const entry of readdirSync(dir)) {
       if (entry === 'node_modules' || entry === '.next' || entry.startsWith('.')) continue;
@@ -499,26 +518,126 @@ describe('nothing in lib/metrics.ts is dead', () => {
     return out;
   }
 
-  it('has a caller outside the module for every exported function', () => {
-    const root = join(import.meta.dirname, '..');
-    const metrics = readFileSync(join(root, 'lib/metrics.ts'), 'utf8');
-    const exported = [...metrics.matchAll(/export async function (\w+)|export function (\w+)/g)]
-      .map((m) => m[1] ?? m[2]!)
-      .filter((name) => name !== 'emit');
+  /**
+   * Comments out, before anything looks for a call.
+   *
+   * The rule this repository already applies to its other source scans: a comment
+   * explaining a call the file no longer makes is prose, and a scan that reads it as
+   * evidence reports the opposite of the truth. String literals are left alone on
+   * purpose — SQL in this codebase is full of quoted text, and cutting it out to catch
+   * the far-fetched case of a call written inside a string would be the larger error.
+   */
+  function stripComments(text: string): string {
+    return text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/.*$/gm, ' ');
+  }
 
-    expect(exported.length).toBeGreaterThan(2);
+  const DECLARATION = /export\s+(?:async\s+)?function\s+(\w+)/g;
 
-    const elsewhere = sources(join(root, 'lib'))
-      .concat(sources(join(root, 'app')))
-      .filter((p) => !p.endsWith('lib/metrics.ts'))
-      .map((p) => readFileSync(p, 'utf8'))
+  function exportedFunctions(text: string): string[] {
+    return [...text.matchAll(DECLARATION)].map((m) => m[1]!);
+  }
+
+  /**
+   * The exported functions of `module` that nothing calls.
+   *
+   * `texts` is every scanned file, comment-stripped, keyed by path — passed in rather
+   * than read inside, so the three tests below can hand it fixtures and watch this
+   * answer both ways.
+   */
+  function deadExports(module: string, texts: Map<string, string>): string[] {
+    const own = texts.get(module);
+    if (own === undefined) throw new Error(`${module} is not among the scanned files`);
+
+    // The defining module counts, minus its own declarations: `export function x(` is
+    // where x comes from, not somewhere it is used.
+    const ownCalls = own.replace(DECLARATION, ' ');
+    const haystack = [...texts]
+      .filter(([path]) => path !== module)
+      .map(([, text]) => text)
+      .concat(ownCalls)
       .join('\n');
 
-    const dead = exported.filter((name) => !new RegExp(`\\b${name}\\s*\\(`).test(elsewhere));
+    return exportedFunctions(own)
+      .filter((name) => !new RegExp(`\\b${name}\\s*\\(`).test(haystack));
+  }
+
+  function scannedSources(): Map<string, string> {
+    const root = join(import.meta.dirname, '..');
+    return new Map(
+      sources(join(root, 'lib')).concat(sources(join(root, 'app')))
+        .map((path) => [path.slice(root.length + 1), stripComments(readFileSync(path, 'utf8'))]),
+    );
+  }
+
+  const fixture = (files: Record<string, string>) => new Map(
+    Object.entries(files).map(([path, text]) => [path, stripComments(text)]),
+  );
+
+  it('names an export that nothing calls', () => {
+    expect(deadExports('m.ts', fixture({
+      'm.ts': 'export function alive() { return 1; }\n'
+        + 'export async function orphan(a: number) { return a; }',
+      'other.ts': 'alive();',
+    }))).toEqual(['orphan']);
+  });
+
+  it('counts a call a module makes to itself, which the old sweep could not see', () => {
+    /*
+     * The blind spot, as a fixture. An export used only inside its own module is
+     * reached, and reporting it dead is how a previous pass came to recommend deleting
+     * code the page renders the output of.
+     */
+    expect(deadExports('m.ts', fixture({
+      'm.ts': 'export function helper() { return 1; }\n'
+        + 'export function top() { return helper(); }',
+      'other.ts': 'top();',
+    }))).toEqual([]);
+  });
+
+  it('does not take a mention in a comment for a call', () => {
+    /*
+     * The other direction of the same hole. Without this, a line of prose keeps a dead
+     * measurement alive in the scan forever — and this project's rule is that a test
+     * which cannot fail is worse than no test.
+     */
+    expect(deadExports('m.ts', fixture({
+      'm.ts': 'export function orphan() { return 2; }',
+      'other.ts': '// orphan() was called here until last month.\n'
+        + '/* see orphan() for the arithmetic */\n',
+    }))).toEqual(['orphan']);
+  });
+
+  it('has a caller for every exported function of every measurement module', () => {
+    const texts = scannedSources();
+    for (const module of MODULES) {
+      expect(exportedFunctions(texts.get(module)!).length, module).toBeGreaterThan(2);
+      const dead = deadExports(module, texts);
+      expect(
+        dead,
+        `exported from ${module} and called by nothing: ${dead.join(', ')}`,
+      ).toEqual([]);
+    }
+  });
+
+  it('keeps trendOf, which is reached only from inside its own module', () => {
+    /*
+     * The instance that proves the fix is reached, kept as an assertion rather than as a
+     * sabotage somebody has to remember to repeat. `leakage()` calls `trendOf` and the
+     * page renders the trend; nothing else in lib/ or app/ names it. If that changes,
+     * the first expectation fails and says so, because then this test has stopped
+     * exercising the internal-call path and something else must.
+     */
+    const texts = scannedSources();
+    const module = 'lib/queries/measure.ts';
+    const elsewhere = [...texts].filter(([path]) => path !== module)
+      .map(([, text]) => text).join('\n');
+
     expect(
-      dead,
-      `exported from lib/metrics.ts and called by nothing: ${dead.join(', ')}`,
-    ).toEqual([]);
+      /\btrendOf\s*\(/.test(elsewhere),
+      'trendOf is now called from another module, so this no longer tests whether the '
+      + 'scan can see a call a module makes to itself — pick an export that is',
+    ).toBe(false);
+    expect(deadExports(module, texts)).not.toContain('trendOf');
   });
 });
 
@@ -596,6 +715,22 @@ describe('the partner figure on the measurement screen', () => {
         + 'source table, so every real enquiry falls into "Not recorded"',
       ).toBeTruthy();
       expect(refer!.enquiries).toBe(1);
+
+      /*
+       * AND IT IS NOT PRESENTED AS A CHANNEL. Reading the page key was half the fix;
+       * printing the page in the same column as "Discharge planner referral" under a
+       * heading that says channel is the other half of the same error. The row says
+       * which question it answers, so the two cannot be added together.
+       */
+      expect(
+        refer!.recordedAs,
+        'a page the form was served at is reported as a channel somebody recorded',
+      ).toBe('page');
+      const typed = rows.find((r) => r.source === 'Word of mouth');
+      expect(typed, 'the seed records no channel label to compare against').toBeTruthy();
+      expect(typed!.recordedAs).toBe('channel');
+      expect(rows.find((r) => r.source === 'Not recorded')?.recordedAs ?? 'nothing')
+        .toBe('nothing');
 
       // And nothing was swallowed on the way: the totals still account for every event.
       const total = rows.reduce((n, r) => n + r.enquiries, 0);

@@ -161,6 +161,23 @@ export async function funnel(ctx: AuditContext): Promise<FunnelRow[]> {
   });
 }
 
+/**
+ * WHICH QUESTION A ROW OF THE BREAKDOWN ANSWERS.
+ *
+ *  - `channel`: somebody recorded how this family came to us, in words. The question
+ *     § 8 is asking.
+ *  - `page`: nobody did, and all that is known is which page the form was served at.
+ *     A near answer to a different question: `/refer` cannot tell a discharge planner
+ *     from an attorney, and three pages are not three channels.
+ *  - `nothing`: neither was recorded.
+ *
+ * Carried out of the query rather than inferred from the label, because the two cannot
+ * be told apart by looking: a channel somebody types as "/refer" is indistinguishable
+ * from the page, and a reader adding a `page` row to a `channel` row is double-counting
+ * a dimension rather than summing one.
+ */
+export type SourceRecordedAs = 'channel' | 'page' | 'nothing';
+
 export interface SourceRow {
   /**
    * A LABEL, not a link to anybody.
@@ -173,6 +190,8 @@ export interface SourceRow {
    * which /partners owns and this module re-exports rather than redefines.
    */
   source: string;
+  /** Whether that label is a channel, a page, or nothing recorded at all. */
+  recordedAs: SourceRecordedAs;
   enquiries: number;
   reachedReferral: number;
 }
@@ -191,35 +210,53 @@ export interface SourceRow {
  * green in the suite and never once computed over a row the running system wrote.
  *
  * Both keys are read now, the label first and the page second, because where somebody
- * recorded a channel that is the better answer. The other half of the fix is not in
- * this file and is not made here: `convertInquiry` records which PAGE an enquiry
- * arrived on, and a page is not a channel — `/refer` cannot tell a discharge planner
- * from an attorney, so until the emitter records the channel this table can only group
- * what it was given.
+ * recorded a channel that is the better answer.
+ *
+ * AND THE ROW SAYS WHICH OF THE TWO IT IS. The other half of that fix was left to the
+ * emitter — "until it records the channel this table can only group what it was given"
+ * — and the emitter cannot record one: `convertInquiry` runs with a page and a partner
+ * key and no channel, and nothing on the conversion form asks for one. So the honest
+ * fix is here, at the read: group both and label each row with the question it answers,
+ * rather than print a page under a heading that says channel. An operator could add a
+ * "/refer" row to a "Discharge planner referral" row and get a number that counts one
+ * family twice in two different dimensions; now the screen says not to.
  */
 export async function bySource(ctx: AuditContext): Promise<SourceRow[]> {
   const { query } = await getDb();
-  const rows = await query<{ source: string; enquiries: string; referred: string }>(
+  const rows = await query<{
+    source: string; recorded_as: string; enquiries: string; referred: string;
+  }>(
     `WITH enq AS (
        SELECT case_id,
               coalesce(nullif(payload ->> 'source', ''),
                        nullif(payload ->> 'sourcePath', ''),
-                       'Not recorded') AS source
+                       'Not recorded') AS source,
+              CASE
+                WHEN nullif(payload ->> 'source', '')     IS NOT NULL THEN 'channel'
+                WHEN nullif(payload ->> 'sourcePath', '') IS NOT NULL THEN 'page'
+                ELSE 'nothing'
+              END AS recorded_as
          FROM metric_events
         WHERE event = 'inquiry_received' AND case_id IS NOT NULL
      ),
      ref AS (
        SELECT DISTINCT case_id FROM metric_events WHERE event = 'referral_made'
      )
-     SELECT e.source,
+     SELECT e.source, e.recorded_as,
             count(*)::text AS enquiries,
             count(r.case_id)::text AS referred
        FROM enq e LEFT JOIN ref r ON r.case_id = e.case_id
-      GROUP BY e.source
+      /*
+       * Grouped by both, so a channel somebody typed as "/refer" and the page of the
+       * same name stay two rows. Collapsing them would be the whole defect again in
+       * one line of SQL.
+       */
+      GROUP BY e.source, e.recorded_as
       ORDER BY count(*) DESC, e.source`,
   );
   return rows.map((r) => ({
     source: r.source,
+    recordedAs: r.recorded_as as SourceRecordedAs,
     enquiries: Number(r.enquiries),
     reachedReferral: Number(r.referred),
   }));

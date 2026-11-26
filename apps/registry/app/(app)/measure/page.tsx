@@ -271,6 +271,23 @@ export default async function MeasurePage() {
           typed — it is not evidence that a named partner sent that family, and it
           grants no partner the right to read the outcome.
         </p>
+        {/*
+          * Two dimensions, said apart rather than printed as one column.
+          *
+          * A row marked "page only" is not a channel: nobody recorded how that family
+          * came to us, and all that is known is which page the form was served at.
+          * Adding it to a channel row counts a family once in each of two different
+          * questions. The rows are not summed anywhere on this screen for that reason.
+          */}
+        {sources.some((s) => s.recordedAs === 'page') ? (
+          <p className="border-b hair px-4 py-2.5 text-xs leading-relaxed"
+            style={{ color: 'var(--ink-faint)' }}>
+            Rows marked <span style={{ color: 'var(--color-soon)' }}>page only</span> are
+            not channels. Nobody recorded how that family came to us, so what is shown is
+            the page their form was served at — and three pages are not three channels.
+            Do not add those rows to the ones above them.
+          </p>
+        ) : null}
         {sources.length === 0 ? (
           <Empty>No enquiry has recorded a source yet.</Empty>
         ) : (
@@ -291,8 +308,17 @@ export default async function MeasurePage() {
               </thead>
               <tbody>
                 {sources.map((s) => (
-                  <tr key={s.source} className="border-t hair">
-                    <td className="px-4 py-2 text-sm">{s.source}</td>
+                  <tr key={`${s.recordedAs}:${s.source}`} className="border-t hair">
+                    <td className="px-4 py-2 text-sm">
+                      {s.source}
+                      {s.recordedAs === 'page' ? (
+                        <span className="ml-2 text-[0.6875rem]"
+                          style={{ color: 'var(--color-soon)' }}
+                          title="The page the form was served at, not a channel somebody recorded. Nobody has said how this family came to us.">
+                          page only
+                        </span>
+                      ) : null}
+                    </td>
                     <td className="px-4 py-2 nums text-sm">{s.enquiries}</td>
                     <td className="px-4 py-2 nums text-sm">{s.reachedReferral}</td>
                     <td className="px-4 py-2">

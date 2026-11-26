@@ -25,7 +25,7 @@ is not tested.
 833 passing tests over 33,345 lines of source, with 13,436 lines of test. 23 migrations,
 38 tables, 12 invariants. First-load JS is 103–109 kB on every route in both apps.
 
-Uncommitted: `CCN-core/src/domain/advertising.ts` and its line in `src/domain/index.ts` —
+Uncommitted: `CCN-core/src/domain/advertising.ts` and its line in `CCN-core/src/domain/index.ts` —
 the § 1812.533(c) work parked mid-flight. It typechecks and nothing calls it.
 
 **Live:** `ccn-external.vercel.app` 200, `ccn-registry.vercel.app/login` 200. Both
@@ -280,7 +280,7 @@ vocabulary drift. The gaps that remain:
 
 1. **The failing capacity test asserts something that is not always true.** Fix it so it
    holds on every calendar date. The current version was a time bomb and it just went off.
-2. ~~**No test fixes the date.**~~ Done, where it can be. `src/domain/dates.ts` is the
+2. ~~**No test fixes the date.**~~ Done, where it can be. `CCN-core/src/domain/dates.ts` is the
    module every expiry, every business-day count and every "is this in force yet"
    resolves through, and it had **no test file of its own** — it was checked through two
    callers, on whatever day the suite happened to run. `CCN-core/tests/dateBoundaries.test.ts`
@@ -295,12 +295,12 @@ vocabulary drift. The gaps that remain:
    the queries. The protection there is the source-level assertion added with the
    capacity fix: `current_date` may not appear in `measure.ts`. The same guard is worth
    extending to the other modules that decide a date in SQL.
-3. ~~**`CCN-external`: `lib/intakeResponse.ts` has six exports and no test naming it.**~~
+3. ~~**`CCN-external`: `CCN-external/lib/intakeResponse.ts` has six exports and no test naming it.**~~
    Done — 14 tests, 7 sabotages. The guard that earns its keep is structural: no public
    intake route may build a `Response` of its own, because each has a `catch` one line
    away from returning a database error message, and those carry the constraint name,
-   the table, and sometimes the value that collided. `lib/proState.ts` and
-   `lib/profileLimits.ts` are still unmentioned, and both are constants and shapes.
+   the table, and sometimes the value that collided. `CCN-external/lib/proState.ts` and
+   `CCN-external/lib/profileLimits.ts` are still unmentioned, and both are constants and shapes.
 
    One thing the tests recorded rather than changed: a tripped honeypot and a real
    acceptance share a status and `ok: true`, but only the real one carries `reference`,
@@ -365,7 +365,7 @@ Items 1–5 are done. What is left on this list is item 6 and the retention poli
 - **The clock rule** (core v0.1.29). `current_date` on a managed Postgres is UTC, and
   nothing sets a connection TimeZone, so a date taken from the server is wrong from four
   in the afternoon Pacific until midnight. It had shipped three times and been caught a
-  fourth, every time by reading. `src/testing/sqlClock.ts` refuses the six spellings and
+  fourth, every time by reading. `CCN-core/src/testing/sqlClock.ts` refuses the six spellings and
   passes the two correct ones, and each repository sweeps itself — including all 26
   migrations, where a date decided wrongly in a trigger is decided wrongly for every
   caller at once. Five sabotages.

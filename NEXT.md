@@ -104,6 +104,47 @@ it. That is one caller, and the seed and any hand-run statement are not it. The 
 is a BEFORE UPDATE guard on `households` raising when `physician_name` goes empty while a
 case on that household is `referred` or `active` and its care type is in `SKILLED`.
 
+**`ccn_app` cannot delete a session, and revoking portal access needs to.** The role is
+created `NOLOGIN` by migration 0003 with no DELETE anywhere, which is right for the
+compliance tables and is stated as a deliberate choice. But the console deletes from
+`sessions` in exactly two places — signing out (`apps/registry/lib/auth.ts`) and revoking
+somebody's portal access (`apps/registry/lib/domain/portalAccess.ts`), where the delete
+sits inside the transaction that disables the user and revokes their invite. Verified
+against the Docker Postgres: under `SET LOCAL ROLE ccn_app`, `DELETE FROM sessions` is
+`permission denied for table sessions`. It does not bite today because the console
+connects as the owner and never drops the role — but it is what stops
+`DATABASE_URL` from being pointed at a reduced role, which is the only way row level
+security would cover the console too. `GRANT DELETE ON TABLE sessions TO ccn_app` and
+nothing else: `sessions` holds live sign-ins, not compliance. A privilege the schema
+depends on should arrive with the schema, so it belongs beside the grants in 0003 rather
+than in a hand-run script. Same file, same reasoning: `ALTER DEFAULT PRIVILEGES IN
+SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO ccn_app` — 0005 grants
+`rate_limit_hits_id_seq` by name, so the next `bigserial` a migration adds is reachable
+for INSERT and fails on its sequence, on a path nobody changed.
+
+**Two columns for one fact, with nothing stopping them disagreeing.** `inquiries.partner_id`
+and `households.partner_id` both answer "which partner sent this family", and
+`partner_referrals()` scopes a partner's sight of a referral on the enquiry's key alone
+while the household's is the durable record. The console now writes both in one
+transaction, refuses a conflicting attach, and reconciles the two on `/partners` — so
+anything it finds came from outside it. What it cannot do is make them unable to
+disagree. The shape, with the full SQL written into the doc comment above
+`attributionDisagreements` in `apps/registry/lib/queries/partners.ts`: a `DEFERRABLE
+INITIALLY DEFERRED` constraint trigger on each table calling one
+`assert_one_sender_per_family(uuid)`. Deferred is load-bearing — `convertInquiry` inserts
+the household before updating the enquiry, so an immediate trigger would reject the
+correct sequence. It cannot go in cold: the backfill that fills a null household key from
+its enquiry is safe and grants nobody anything, and the reverse is an access grant that
+belongs to an operator, which is what the new screen gives them the list for. Reasoned
+from the DDL rather than executed.
+
+**No CHECK on `providers.rate_hourly`.** `recordStatedRate` validates the attestation and
+the provider's existence; "above nothing, at most 1000" lives in the zod schema in
+`app/(app)/actions.ts`, so a caller reaching the module directly can write a negative
+rate. Either a `> 0` floor in the module or a column CHECK in core — the latter is the
+one that holds for every caller. Worth weighing against the I5 and § 1812.530-531
+reasoning that nothing here sets, suggests or caps a rate: a floor at zero is not a cap.
+
 `restructure/workspaces` was merged to `main` on 2026-11-06; `main` is the workspace
 layout and the branch is gone. `vercel.json` at the repository root sets the build
 command and output directory, so the deployment does not need a Root Directory set in

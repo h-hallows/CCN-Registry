@@ -4,7 +4,7 @@ Internal operations tool for a California nurses' registry. One operator, no pub
 surface. Built to [`docs/ccn-registry-os-build-spec.md`](docs/ccn-registry-os-build-spec.md) v2.0 and
 [`docs/ccn-architecture-build-spec.md`](docs/ccn-architecture-build-spec.md) v1.0.
 
-**Read [`packages/core/INVARIANTS.md`](packages/core/INVARIANTS.md) before changing anything.** Each rule there maps
+**Read [`CCN-core/INVARIANTS.md`](https://github.com/h-hallows/CCN-core/blob/main/INVARIANTS.md) before changing anything.** Each rule there maps
 to a condition in Civil Code § 1812.5095(b) or Unemployment Insurance Code § 687.2, and
 those nine factors are the only mechanism keeping a referred provider from being treated
 as the registry's employee. Labor Code § 2777's referral agency exemption does not apply
@@ -134,7 +134,7 @@ every session. There is deliberately no flag to re-enable it.
 ### Getting a deployment running
 
 Provision the database **through Vercel** — Storage → Marketplace → Supabase. Doing it
-there injects the connection strings into the project automatically, and `lib/env.ts`
+there injects the connection strings into the project automatically, and `CCN-core/src/env.ts`
 reads the names Vercel uses (`POSTGRES_URL`, `POSTGRES_URL_NON_POOLING`,
 `DATABASE_URL_UNPOOLED`) as well as its own, so there is nothing to copy by hand.
 Supabase rather than Neon because architecture spec § 4 puts all four portal roles on
@@ -148,8 +148,13 @@ Then:
 1. Set `RESEND_API_KEY` and `MAIL_FROM` (a sender on a domain Resend has verified).
    Without them **nobody can sign in at all** — in production the console mail driver
    does not exist, so there is no link to copy out of the logs and none is printed. Set
-   `PORTAL_URL` too, so the portal links this console issues point at the right host; it
-   defaults to `http://localhost:3003`.
+   `PORTAL_URL` too, so the portal links this console issues point at the right host.
+   On a production build it has no default: with neither it nor `NEXT_PUBLIC_SITE_URL`
+   set, granting portal access **refuses** rather than minting a link to localhost, and
+   refuses before writing anything. A grant that succeeded while handing a family an
+   address only they can reach would leave an audit entry saying they were let in on a
+   day nobody could have let them in. Locally it still defaults to
+   `http://localhost:3003`.
 2. Apply the schema from a machine that can reach the database — **there is no migration
    step in the deployment**, by design, so nothing can migrate a live database on a push:
 
@@ -160,8 +165,9 @@ Then:
    `db:deploy` only applies pending migrations. `db:reset` and `db:seed` both refuse to
    run against a remote Postgres without `--i-mean-it`, because one drops the schema and
    the other truncates every table.
-3. Run `scripts/sql/app-role.sql` in the Supabase SQL editor and point the application at
-   that role. See below for why.
+3. Run `scripts/sql/app-role.sql` in the Supabase SQL editor, as the role that runs
+   migrations, and point `DATABASE_URL` at the role it creates. Leave `DIRECT_URL` on the
+   owner. See below for why this step is not optional.
 4. Check `/api/health`. It reports driver, reachability and pending migrations, needs no
    sign-in, and returns nothing about any household or provider.
 
@@ -171,15 +177,33 @@ pooler. `resolveMigrationConfig` refuses that case with a message naming the hos
 
 ### Connect as a non-owner role
 
-Row level security is enabled on every table from the first migration, but a table owner
-bypasses RLS, so the application role must not own the schema:
+Row level security is enabled on every table from the first migration, and the policies
+are the access control for all four portal roles. **A table owner bypasses RLS
+entirely**, so an application connected as the role that ran the migrations has every
+policy in the schema as decoration — present, correct, tested, green, and never reached.
 
-```sql
-CREATE ROLE ccn_app LOGIN PASSWORD '…';
-GRANT USAGE ON SCHEMA public TO ccn_app;
-GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO ccn_app;
--- No DELETE: the compliance record is append-only by design.
-```
+`scripts/sql/app-role.sql` is the whole step, and it is commented. The SQL is not
+repeated here, because a snippet in a README and a file in the tree that both claim to be
+the grants is two things to keep in step, and the one that rots is the one nobody runs.
+
+Three things in it are not obvious, and each was a deployment that would have broken on
+its own:
+
+- **`DELETE` on `sessions`, and nowhere else.** No DELETE anywhere is the right default —
+  `assignment_log` is the § 1812.529 permanent record and `audit_log` answers who looked
+  at a household, and both refuse DELETE at the row level besides. But the console
+  deletes live sessions in exactly two places: signing out, and revoking somebody's
+  portal access, where the delete sits inside the transaction that disables the user and
+  revokes their invite. Without the grant that transaction fails whole, so revoking a
+  family's access would not work — the one operation where failing closed is not the safe
+  direction.
+- **`USAGE` on sequences.** `rate_limit_hits.id` is `bigserial` and the rate limiter is
+  in front of all three public intake routes, so without it every enquiry, referral and
+  application INSERT fails.
+- **`ALTER DEFAULT PRIVILEGES`.** `GRANT … ON ALL TABLES` is a snapshot of the tables
+  that exist when it runs. Twenty-odd migrations have shipped and more will; without the
+  default privileges the deployment works until a migration adds a table, and then fails
+  on a path nobody touched.
 
 ### Sign-in
 

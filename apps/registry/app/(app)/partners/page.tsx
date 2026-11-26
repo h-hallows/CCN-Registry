@@ -1,10 +1,12 @@
 import { requireOperator } from '@/lib/operator';
-import { listPartners, unattributedReferrals } from '@/lib/queries/partners';
+import {
+  attributionDisagreements, listPartners, unattributedReferrals,
+} from '@/lib/queries/partners';
 import { portalUsersForMany } from '@/lib/domain/portalAccess';
 import { addPartnerAction, attachReferralAction } from '@/app/(app)/actions';
 import { ActionForm, Disclose } from '@/components/ActionForm';
 import { PortalAccess } from '@/components/PortalAccess';
-import { Empty, Section, shortDate } from '@/components/ui';
+import { Banner, Empty, Section, shortDate } from '@/components/ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,9 +20,10 @@ export const dynamic = 'force-dynamic';
  */
 export default async function PartnersPage() {
   const { ctx } = await requireOperator();
-  const [partners, loose] = await Promise.all([
+  const [partners, loose, disagreements] = await Promise.all([
     listPartners(ctx),
     unattributedReferrals(ctx),
+    attributionDisagreements(ctx),
   ]);
 
   // One read for every partner's accounts, not one per partner.
@@ -62,6 +65,48 @@ export default async function PartnersPage() {
           who may read an outcome, so it is the one counted here.
         </p>
       </div>
+
+      {/*
+        * WHO SENT A FAMILY IS RECORDED TWICE, AND THIS IS WHERE THEY ARE COMPARED.
+        *
+        * The enquiry carries the key that decides who may read the referral and its
+        * outcome; the household record carries the one that outlives the enquiry. Both
+        * are needed and nothing in the database stops them differing, so the next best
+        * thing is that a difference is impossible to miss — on the screen that owns
+        * referral partners, above the counts it would otherwise quietly distort.
+        *
+        * Everything this console writes sets both together, so anything showing here
+        * was written from outside it. That is the half no test of our own writes can
+        * reach, which is why it is on the screen and not only in the suite.
+        */}
+      {disagreements.length > 0 ? (
+        <Banner
+          tone="alert"
+          title={disagreements.length === 1
+            ? 'One family is recorded as sent by two different people'
+            : `${disagreements.length} families are recorded as sent by two different people`}
+        >
+          <p>
+            The enquiry and the household record do not name the same sender. The
+            enquiry is what grants a partner sight of the referral and its outcome, so
+            until these agree the credit on this screen and the access behind it are
+            two different answers. Correct whichever is wrong.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {disagreements.map((d) => (
+              <li key={d.inquiryId} className="nums">
+                {d.householdName}: enquiry says{' '}
+                <strong>{d.onEnquiryName ?? 'nobody'}</strong>, household record says{' '}
+                <strong>{d.onHouseholdName ?? 'nobody'}</strong>
+                {' · '}
+                <span style={{ color: 'var(--ink-faint)' }}>
+                  enquiry {shortDate(d.receivedAt)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Banner>
+      ) : null}
 
       {partners.length === 0 ? (
         <Section title="Nobody on the list">

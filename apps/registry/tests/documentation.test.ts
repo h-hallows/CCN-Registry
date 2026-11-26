@@ -19,7 +19,7 @@
  * tested too, and as rules rather than as those three instances: the names it uses must
  * resolve, and it must not describe a practice the code refuses.
  */
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -29,9 +29,39 @@ const APP = new URL('../', import.meta.url).pathname;
 
 const read = (p: string) => readFileSync(p, 'utf8');
 
-const docs = readdirSync(REPO)
-  .filter((n) => n.endsWith('.md'))
-  .map((name) => ({ name, text: read(join(REPO, name)) }));
+/**
+ * Source with its comments removed, for the scan below.
+ *
+ * The public site's copy of this rule reported a variable called `NEXT_PUBLIC_`, out of
+ * three comments explaining that Next substitutes `process.env.NEXT_PUBLIC_*` where it
+ * appears and cannot follow an indexed read. Nothing in this console is written that way
+ * today, so this is here before it is needed rather than after: it is the fourth time a
+ * source scan in these repositories has read a comment as code, and the pattern is
+ * always the same — the comment that explains a rule is written in the vocabulary the
+ * rule forbids, and it is the passage most worth keeping.
+ *
+ * `//` is only taken as a comment when nothing precedes it immediately, so the `//` in a
+ * `https://` URL inside a string survives.
+ */
+const code = (p: string) => read(p)
+  .replace(/\/\*[\s\S]*?\*\//g, ' ')
+  .replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+/** A documented path may be relative to the repository root or to the app. */
+const ROOTS = [REPO, APP];
+
+const docs = [
+  ...readdirSync(REPO).filter((n) => n.endsWith('.md'))
+    .map((name) => ({ name, path: join(REPO, name) })),
+  /*
+   * The pull request template is a document too, and the one every contributor reads.
+   * It cited `packages/core/INVARIANTS.md` — the pre-extraction layout — so every pull
+   * request opened since carried an invariant checklist pointing at a file that is not
+   * there.
+   */
+  ...readdirSync(join(REPO, '.github')).filter((n) => n.endsWith('.md'))
+    .map((name) => ({ name: `.github/${name}`, path: join(REPO, '.github', name) })),
+].map(({ name, path }) => ({ name, text: read(path) }));
 
 function scripts(packageJson: string): string[] {
   return Object.keys(JSON.parse(read(packageJson)).scripts ?? {});
@@ -103,7 +133,7 @@ describe('every variable the console reads is written down somewhere', () => {
         if (e.isDirectory()) {
           walk(full);
         } else if (/\.(ts|tsx|mjs)$/.test(e.name)) {
-          for (const m of read(full).matchAll(/process\.env\.([A-Z][A-Z0-9_]*)/g)) {
+          for (const m of code(full).matchAll(/process\.env\.([A-Z][A-Z0-9_]*)/g)) {
             const where = found.get(m[1]!) ?? [];
             where.push(full.replace(REPO, ''));
             found.set(m[1]!, where);
@@ -210,4 +240,75 @@ describe('no document offers a log as a place to find a credential', () => {
       ).toEqual([]);
     });
   }
+});
+
+describe('every file the documentation names is there', () => {
+  /*
+   * THE DEFECT THIS RULE IS ABOUT. Step 3 of *Getting a deployment running* said to run
+   * `scripts/sql/app-role.sql` in the Supabase SQL editor. That file has never existed.
+   * The statements it was meant to hold were in this same README three sections below,
+   * under *Connect as a non-owner role*, so the instruction was not wrong about what to
+   * do — only about where to find it, which is the kind of wrongness a reader cannot
+   * diagnose. An operator standing a deployment up follows step 3, finds nothing, and
+   * has no way to know whether the step is obsolete or the file is missing. Skipping it
+   * leaves the application connected as the schema owner, and a table owner bypasses
+   * row level security on every table.
+   *
+   * The script-name rule above could not see it: `scripts/sql/app-role.sql` is not an
+   * npm script. So the rule is widened from commands to anything the documentation
+   * tells a reader to open.
+   *
+   * WHAT COUNTS AS A PATH. A backticked token containing a slash and ending in a file
+   * extension. Directories are excluded deliberately — `app/(marketing)` and
+   * `content/statutory` are written as prose nouns throughout and carry parentheses a
+   * path matcher would have to special-case. A file is the case that matters: a reader
+   * sent to a directory that has moved finds the tree and recovers, while a reader sent
+   * to a file that does not exist finds nothing at all.
+   */
+  const PATH = /`([A-Za-z0-9_./-]+\/[A-Za-z0-9_.-]+\.(?:ts|tsx|sql|mjs|md|css|json|yml))`/g;
+
+  const named = [...new Set(
+    docs.flatMap(({ text }) => [...text.matchAll(PATH)].map((m) => m[1]!)),
+  )].sort();
+
+
+  /**
+   * A path is checked against THIS repository. A path prefixed with a sibling
+   * repository's name is a different claim and is not checked here.
+   *
+   * WHY NOT RESOLVE THE SIBLINGS. They are separate repositories — on a CI runner only
+   * one is checked out, and `@h-hallows/core` arrives as a tarball in `node_modules`
+   * with no `tests/` directory at all. A rule that passed locally and could not run in
+   * CI would be worse than no rule. So the guarantee is narrower and honest: an
+   * UNPREFIXED path must exist here, and a path about a sibling must say which sibling.
+   *
+   * That second half is worth as much as the first. Ten paths failed this rule when it
+   * was written, and only three of them were dead: the rest were real files named
+   * without their repository, in a project where `lib/notify.ts` and
+   * `tests/clientPortal.test.ts` each exist in a different repository from the document
+   * naming them. A reader had no way to tell a moved file from one they were looking for
+   * in the wrong tree.
+   */
+  const SIBLINGS = ['CCN-core/', 'CCN-external/'];
+  const SELF = 'CCN-Registry/';
+
+  function resolves(p: string): boolean {
+    if (SIBLINGS.some((s) => p.startsWith(s))) return true;
+    const local = p.startsWith(SELF) ? p.slice(SELF.length) : p;
+    return ROOTS.some((root) => existsSync(join(root, local)));
+  }
+
+  it('found paths at all, so an empty scan cannot pass as a clean one', () => {
+    expect(named.length).toBeGreaterThan(3);
+  });
+
+  it('names only files that exist', () => {
+    const missing = named.filter((p) => !resolves(p));
+    expect(
+      missing,
+      `the documentation tells a reader to open ${missing.join(', ')}, and no such file `
+      + 'exists. Either it was moved, or it was named from an intention rather than '
+      + 'from the tree.',
+    ).toEqual([]);
+  });
 });

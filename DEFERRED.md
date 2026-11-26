@@ -28,7 +28,7 @@ That stopped being true when the public platform was built, and nobody noticed f
 same reason nobody notices any of these: **nothing writes the table, so the screen it
 feeds renders nothing, and an empty screen looks exactly like an absent one.**
 `CCN-external/lib/schedule.ts` reads `coverage_gaps`, and `/portal/schedule` renders what
-it finds under "The next thirty days" — tested, in `tests/clientPortal.test.ts`, against
+it finds under "The next thirty days" — tested, in `CCN-external/tests/clientPortal.test.ts`, against
 rows the test inserts itself. The same shape as the two statutory registers found empty
 this month.
 
@@ -59,7 +59,7 @@ the bottom of `INVARIANTS.md`.
 
 **Soft match score (§ 4.4).** Not implemented, deliberately. The spec's own direction:
 *"Defer the soft score. These weights are invented... Ship M4 as hard filters plus a
-sortable eligible list."* `lib/domain/match.ts` implements § 4.3 hard filters and returns
+sortable eligible list."* `apps/registry/lib/queries/match.ts` implements § 4.3 hard filters and returns
 a per-provider exclusion reason. The score is added once § 8 has a few dozen placement
 outcomes to fit it to.
 

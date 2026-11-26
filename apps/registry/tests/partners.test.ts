@@ -13,8 +13,8 @@ import { join } from 'node:path';
 import type { DbHandle } from '@h-hallows/core/db';
 import { seededDb, TEST_CTX } from '@h-hallows/core/testing';
 import {
-  attachReferralToPartner, listPartners, PartnerError, partnerPopulation,
-  unattributedReferrals,
+  attachReferralToPartner, attributionDisagreements, listPartners, PartnerError,
+  partnerPopulation, unattributedReferrals,
 } from '@/lib/queries/partners';
 
 let db: DbHandle;
@@ -361,6 +361,21 @@ describe('one partner population', () => {
     }
   });
 
+  it('is read by the screen that owns referral partners', () => {
+    /*
+     * A control that is present, correct, tested and never reached is the failure this
+     * project is organised against, and a reconciliation nobody renders is exactly that
+     * shape: it would sit here going green over a disagreement no operator ever saw.
+     */
+    const page = readFileSync(
+      join(import.meta.dirname, '..', 'app/(app)/partners/page.tsx'), 'utf8');
+    expect(
+      page,
+      '/partners does not read attributionDisagreements, so a family recorded as sent '
+      + 'by two different people is reconciled by a query nobody looks at',
+    ).toMatch(/attributionDisagreements\(/);
+  });
+
   it('leaves the partner population to the one module that owns it', () => {
     /*
      * THE RULE, not the instance.
@@ -407,5 +422,277 @@ describe('one partner population', () => {
       'these compute a partner figure of their own instead of importing '
       + 'partnerPopulation from lib/queries/partners.ts: ' + offenders.join(', '),
     ).toEqual([]);
+  });
+});
+
+/**
+ * ONE SENDER, WRITTEN IN TWO COLUMNS.
+ *
+ * Yesterday's commit defined "a family a partner sent" once and counted both columns.
+ * What it did not fix is why there are two: `inquiries.partner_id` and
+ * `households.partner_id` record the same fact and nothing stops them disagreeing.
+ *
+ * They cannot be collapsed into one. The enquiry's key is what `partner_referrals()`
+ * (core migration 0012) selects on, so it alone decides who may read a referral and its
+ * outcome; the household's is the record that outlives the enquiry leaving the queue,
+ * and the only attribution a family who never filled in a form can have. A disagreement
+ * is therefore not a reporting nuisance — it is the credit on one screen and the access
+ * behind it giving two different answers.
+ *
+ * A database constraint would be better than all of this and is not reachable from here:
+ * the migrations live in @h-hallows/core. So: every write path in this console sets both
+ * together, and anything written from outside it is put on the screen.
+ */
+describe('the two columns that record one sender', () => {
+  const CTX = { ...TEST_CTX, actor: 'reconciler@example.com' };
+
+  /** An enquiry that has already become a household, with no sender recorded yet. */
+  async function convertedFamily(): Promise<{ inquiryId: string; householdId: string }> {
+    const household = await one<{ id: string }>(
+      `INSERT INTO households (display_name, dm_name, cr_area)
+       VALUES ('Attribution Fixture', 'A Daughter', 'Pasadena') RETURNING id`,
+    );
+    const inquiry = await one<{ id: string }>(
+      `INSERT INTO inquiries (name, source_path, household_id, handled_at, handled_by)
+       VALUES ('Already Opened', '/refer', $1, now(), 'ops@example.com') RETURNING id`,
+      [household.id],
+    );
+    return { inquiryId: inquiry.id, householdId: household.id };
+  }
+
+  /**
+   * Removed by hand rather than rolled back. `attachReferralToPartner` opens its own
+   * transaction, and on PGlite a transaction holds the only connection — the note in
+   * tests/measure.test.ts records what nesting one does to this suite.
+   */
+  async function forget(f: { inquiryId: string; householdId: string }): Promise<void> {
+    await db.query(`DELETE FROM inquiries WHERE id = $1`, [f.inquiryId]);
+    await db.query(`DELETE FROM households WHERE id = $1`, [f.householdId]);
+  }
+
+  const senderOf = (f: { inquiryId: string; householdId: string }) => one<{
+    on_enquiry: string | null; on_household: string | null;
+  }>(
+    `SELECT (SELECT partner_id FROM inquiries  WHERE id = $1) AS on_enquiry,
+            (SELECT partner_id FROM households WHERE id = $2) AS on_household`,
+    [f.inquiryId, f.householdId],
+  );
+
+  it('writes both when a referral that already became a household is attached', async () => {
+    /*
+     * THE DEFECT. The list this is called from shows handled referrals — /partners
+     * prints "already handled" beside them — so this path is ordinary, not exotic. It
+     * wrote the enquiry's key alone, leaving the durable record naming nobody, and the
+     * attribution would have gone with the enquiry row.
+     */
+    const partner = await one<{ id: string }>(
+      `SELECT id FROM referral_partners ORDER BY name LIMIT 1`);
+    const family = await convertedFamily();
+    try {
+      const result = await attachReferralToPartner(CTX, family.inquiryId, partner.id);
+      expect(result.householdAttributed).toBe(true);
+
+      const sender = await senderOf(family);
+      expect(sender.on_enquiry).toBe(partner.id);
+      expect(
+        sender.on_household,
+        'the enquiry names the partner and the household record names nobody, so the '
+        + 'durable half of the attribution is missing',
+      ).toBe(partner.id);
+    } finally {
+      await forget(family);
+    }
+  });
+
+  it('refuses rather than choosing between two senders, and writes neither', async () => {
+    const [first, second] = await db.query<{ id: string; name: string }>(
+      `SELECT id, name FROM referral_partners ORDER BY name LIMIT 2`);
+    const family = await convertedFamily();
+    try {
+      // The household was recorded as sent by one partner; the enquiry is offered another.
+      await db.query(`UPDATE households SET partner_id = $2 WHERE id = $1`,
+        [family.householdId, first!.id]);
+
+      await expect(attachReferralToPartner(CTX, family.inquiryId, second!.id))
+        .rejects.toThrow(PartnerError);
+      await expect(attachReferralToPartner(CTX, family.inquiryId, second!.id))
+        .rejects.toThrow(/already recorded as sent by/);
+
+      /*
+       * And nothing was half-written. A refusal that had already set the enquiry's key
+       * would have granted the second partner sight of the referral on the way out.
+       */
+      const sender = await senderOf(family);
+      expect(sender.on_enquiry).toBeNull();
+      expect(sender.on_household).toBe(first!.id);
+    } finally {
+      await forget(family);
+    }
+  });
+
+  it('puts a disagreement written from outside this console on the screen', async () => {
+    /*
+     * The case no test of our own writes can reach: the public platform, the seed, or
+     * somebody at a psql prompt. Written here the way they would write it — straight at
+     * the column — which is the only reason this can fail.
+     */
+    const partner = await one<{ id: string; name: string }>(
+      `SELECT id, name FROM referral_partners ORDER BY name LIMIT 1`);
+    const family = await convertedFamily();
+    try {
+      const before = await attributionDisagreements(CTX);
+      expect(before.some((d) => d.inquiryId === family.inquiryId)).toBe(false);
+
+      await db.query(`UPDATE inquiries SET partner_id = $2 WHERE id = $1`,
+        [family.inquiryId, partner.id]);
+
+      const found = (await attributionDisagreements(CTX))
+        .find((d) => d.inquiryId === family.inquiryId);
+      expect(
+        found,
+        'the enquiry names a partner and the household record names nobody, and the '
+        + 'screen that owns referral partners reports no disagreement',
+      ).toBeTruthy();
+      expect(found!.onEnquiryName).toBe(partner.name);
+      expect(found!.onHouseholdName).toBeNull();
+      expect(found!.householdName).toBe('Attribution Fixture');
+
+      /*
+       * Audited against the household it names. A reconciliation screen that prints a
+       * family's name is not a side door, and the § 8 reads hold to the same rule.
+       */
+      const logged = await one<{ n: string }>(
+        `SELECT count(*)::text AS n FROM audit_log
+          WHERE actor = 'reconciler@example.com' AND entity = 'household'
+            AND entity_id = $1
+            AND diff ->> 'read' = 'the partner attribution reconciliation'`,
+        [family.householdId],
+      );
+      expect(Number(logged.n)).toBeGreaterThan(0);
+
+      // Agreed, and it leaves the screen. Both directions, or it only tests one.
+      await db.query(`UPDATE households SET partner_id = $2 WHERE id = $1`,
+        [family.householdId, partner.id]);
+      expect((await attributionDisagreements(CTX))
+        .some((d) => d.inquiryId === family.inquiryId)).toBe(false);
+    } finally {
+      await forget(family);
+    }
+  });
+
+  it('reports the disagreement whose other side is a null', async () => {
+    /*
+     * THE RULE, not the instance. Half of these have nobody on one side, and `<>` is
+     * null for those rather than true — a comparison written that way reports no
+     * disagreement at all and the banner never renders, which is the defect this whole
+     * read exists to prevent, one layer down. So both shapes are asserted: two
+     * different partners, and one partner against nobody.
+     */
+    const [first, second] = await db.query<{ id: string; name: string }>(
+      `SELECT id, name FROM referral_partners ORDER BY name LIMIT 2`);
+    const family = await convertedFamily();
+    try {
+      await db.query(`UPDATE inquiries  SET partner_id = $2 WHERE id = $1`,
+        [family.inquiryId, first!.id]);
+      await db.query(`UPDATE households SET partner_id = $2 WHERE id = $1`,
+        [family.householdId, second!.id]);
+
+      const both = (await attributionDisagreements(CTX))
+        .find((d) => d.inquiryId === family.inquiryId);
+      expect(both, 'two different senders are not reported as a disagreement').toBeTruthy();
+      expect(both!.onEnquiryName).toBe(first!.name);
+      expect(both!.onHouseholdName).toBe(second!.name);
+
+      // Now the null-sided shape, which is the one a `<>` comparison loses.
+      await db.query(`UPDATE inquiries SET partner_id = NULL WHERE id = $1`,
+        [family.inquiryId]);
+      const nulled = (await attributionDisagreements(CTX))
+        .find((d) => d.inquiryId === family.inquiryId);
+      expect(
+        nulled,
+        'the household record names a sender, the enquiry names nobody, and nothing '
+        + 'reports it — so the partner is credited with a family they cannot see',
+      ).toBeTruthy();
+      expect(nulled!.onEnquiryName).toBeNull();
+      expect(nulled!.onHouseholdName).toBe(second!.name);
+    } finally {
+      await forget(family);
+    }
+  });
+
+  it('counts that family once while one column is ahead of the other', async () => {
+    /*
+     * Mid-correction, the figure must not move. A family whose enquiry and household
+     * name the same partner, or where one of the two has not been written yet, is one
+     * family sent — the union is keyed by the household — and a count that climbed
+     * while an operator was halfway through attaching a referral would send them
+     * looking for a second family that does not exist.
+     */
+    const partner = await one<{ id: string }>(
+      `SELECT id FROM referral_partners ORDER BY name LIMIT 1`);
+    const family = await convertedFamily();
+    try {
+      const before = await partnerPopulation();
+
+      for (const [onEnquiry, onHousehold] of [
+        [partner.id, partner.id], [partner.id, null], [null, partner.id],
+      ] as const) {
+        await db.query(`UPDATE inquiries  SET partner_id = $2 WHERE id = $1`,
+          [family.inquiryId, onEnquiry]);
+        await db.query(`UPDATE households SET partner_id = $2 WHERE id = $1`,
+          [family.householdId, onHousehold]);
+        const during = await partnerPopulation();
+        expect(during.referrals, `${onEnquiry} / ${onHousehold}`)
+          .toBe(before.referrals + 1);
+        expect(during.became).toBe(before.became + 1);
+      }
+    } finally {
+      await forget(family);
+    }
+  });
+
+  it('counts that family twice when the two columns name two different partners', async () => {
+    /*
+     * FOUND BY THE TEST ABOVE, AND NOT PAPERED OVER.
+     *
+     * `PARTNER_REFERRALS_CTE` says a family is counted once, keyed by the household.
+     * That is true in every state except this one: the group is (partner, family), so
+     * two partners naming one family are two rows and the total reads one family too
+     * many. The figure is not wrong about its own question — two partners have each
+     * been recorded as having sent this family, and each of their cards says one —
+     * but it is one family.
+     *
+     * It is asserted rather than fixed because the fix would be a lie of a different
+     * kind. Counting the family once means choosing which partner keeps the credit,
+     * and nothing in the data says which is right; attributing it to the household's
+     * key would also make the per-partner cards stop summing to the header, which is
+     * the defect this module was rewritten to end. The honest handling is the one in
+     * place: the screen reports the disagreement, above the counts, in words, and the
+     * number comes back to one family the moment somebody corrects it.
+     *
+     * The constraint named in the report is what makes this state unreachable.
+     */
+    const [first, second] = await db.query<{ id: string }>(
+      `SELECT id FROM referral_partners ORDER BY name LIMIT 2`);
+    const family = await convertedFamily();
+    try {
+      const before = await partnerPopulation();
+      await db.query(`UPDATE inquiries  SET partner_id = $2 WHERE id = $1`,
+        [family.inquiryId, first!.id]);
+      await db.query(`UPDATE households SET partner_id = $2 WHERE id = $1`,
+        [family.householdId, second!.id]);
+
+      const during = await partnerPopulation();
+      expect(during.referrals).toBe(before.referrals + 2);
+
+      // And the two screens still agree with each other about the inflated figure,
+      // so the only thing that tells an operator is the reconciliation on /partners.
+      const rows = await listPartners(TEST_CTX);
+      expect(rows.reduce((n, r) => n + r.sent, 0)).toBe(during.referrals);
+      expect((await attributionDisagreements(CTX))
+        .some((d) => d.inquiryId === family.inquiryId)).toBe(true);
+    } finally {
+      await forget(family);
+    }
   });
 });

@@ -40,13 +40,62 @@ async function count(sql: string, params: unknown[] = []): Promise<number> {
   return Number(row.n);
 }
 
+/**
+ * The window every fixture advertisement in this file sits in, and the reason it is
+ * computed rather than written down.
+ *
+ * THESE DATES READ `2026-02-01` AND `2026-02-28`, AND THE FILE WAS GREEN FOR WEEKS
+ * BEFORE IT WASN'T. The seed's advertising record leaves a deliberate nine-day hole —
+ * the first website retired 300 days before today, the current one going up 290 days
+ * before today, so days 299 to 291 back are uncovered, and that hole is the whole point
+ * of `counts the correction and not the entry it replaced`. The hole moves with today.
+ * February 2026 did not. Around 2026-11-19 the hole slid onto 2026-01-31..2026-02-08,
+ * where `appearedFrom: '2026-02-01'` covered all but the first day of it. The fixture
+ * that did the swallowing is the one in `leaves a continuous medium open when no end
+ * date is given`: a continuous medium with no end date runs from its start to today, so
+ * a single fixture pinned one day inside the hole covered the rest of it outright. A
+ * print fixture could not have — the application closes a dated medium on the day it
+ * ran, which is the test two above — and that distinction is why the sabotage run for
+ * this fix had to be redone. The record ended up with a single uncovered day,
+ * the test asked for a stretch longer than two, and the failure said
+ * `expected 1 to be greater than 2`: nothing whatever about advertising.
+ *
+ * This is the fifth time a fixture in these repositories has been pinned to a literal
+ * date while the thing it was written against moved — after the UTC-versus-California
+ * date bug four times over, and `tests/alternates.test.ts`, which was green the day it
+ * was written and red the next morning. So: thirty to twenty days back, which is inside
+ * the trailing year the record is answerable for and inside the stretch the seed's
+ * current website already covers, so these fixtures change the coverage arithmetic by
+ * nothing at all and cannot overlap the hole for any value of today.
+ *
+ * AND TODAY COMES FROM `coverage.windowTo`, NOT FROM `new Date()`. That field is
+ * documented as "today, in California", and it is the same clock the assertions are
+ * read against. Taking today from the system clock here would have been the sixth
+ * instance of the bug this comment is about.
+ */
+let AD_FROM: string;
+let AD_TO: string;
+/** `n` days after AD_FROM, for the corrections that move a start date. */
+let adFromPlus: (n: number) => string;
+/**
+ * The day a withdrawn advertisement came down: inside the window it ran in.
+ *
+ * This read '2026-03-15', which was after the old pinned start of '2026-02-01' and is
+ * nine months after the window above. Moving the fixtures without moving this closed
+ * three advertisements before they began, which the advertising_log_interval check
+ * refuses outright — so a date pinned in one place had quietly made a date pinned in
+ * another place load-bearing. That is the second half of why none of them are written
+ * down any more.
+ */
+let CAME_DOWN: string;
+
 /** A lawful entry, so each test varies one thing. */
 function newAd(over: Partial<Parameters<typeof recordAdvertisement>[1]> = {}) {
   return {
     medium: 'website',
     publication: `t-${Math.random().toString(36).slice(2, 10)}.example`,
-    appearedFrom: '2026-02-01',
-    appearedTo: '2026-02-28',
+    appearedFrom: AD_FROM,
+    appearedTo: AD_TO,
     reference: null,
     carriedName: 'CCN',
     carriedContact: '(310) 555-0147',
@@ -54,7 +103,15 @@ function newAd(over: Partial<Parameters<typeof recordAdvertisement>[1]> = {}) {
   };
 }
 
-beforeAll(async () => { db = await seededDb(); });
+beforeAll(async () => {
+  db = await seededDb();
+  const { coverage } = await record(TEST_CTX);
+  const today = parseISODate(coverage.windowTo);
+  AD_FROM = formatISODate(addDays(today, -30));
+  AD_TO = formatISODate(addDays(today, -20));
+  adFromPlus = (n) => formatISODate(addDays(parseISODate(AD_FROM), n));
+  CAME_DOWN = adFromPlus(5);
+});
 
 
 describe('the record reads back', () => {
@@ -168,7 +225,7 @@ describe('recording an advertisement', () => {
 
   it('closes a dated medium on the day it ran, whatever the form said', async () => {
     const id = await recordAdvertisement(TEST_CTX, newAd({
-      medium: 'print', appearedFrom: '2026-02-01', appearedTo: null,
+      medium: 'print', appearedFrom: AD_FROM, appearedTo: null,
     }));
     const row = await one<{ appeared_from: string; appeared_to: string }>(
       `SELECT appeared_from::text, appeared_to::text FROM advertising_log WHERE id = $1`, [id]);
@@ -187,11 +244,11 @@ describe('recording an advertisement', () => {
 describe('withdrawing one', () => {
   it('records the day it came down, once', async () => {
     const id = await recordAdvertisement(TEST_CTX, newAd({ appearedTo: null }));
-    await withdrawAdvertisement(TEST_CTX, id, '2026-03-15');
+    await withdrawAdvertisement(TEST_CTX, id, CAME_DOWN);
 
     const row = await one<{ appeared_to: string }>(
       `SELECT appeared_to::text FROM advertising_log WHERE id = $1`, [id]);
-    expect(row.appeared_to).toBe('2026-03-15');
+    expect(row.appeared_to).toBe(CAME_DOWN);
 
     const audited = await count(
       `SELECT count(*)::text AS n FROM audit_log
@@ -201,23 +258,23 @@ describe('withdrawing one', () => {
 
   it('explains the second attempt instead of overwriting the first', async () => {
     const id = await recordAdvertisement(TEST_CTX, newAd({ appearedTo: null }));
-    await withdrawAdvertisement(TEST_CTX, id, '2026-03-15');
+    await withdrawAdvertisement(TEST_CTX, id, CAME_DOWN);
 
-    await expect(withdrawAdvertisement(TEST_CTX, id, '2026-04-01'))
+    await expect(withdrawAdvertisement(TEST_CTX, id, adFromPlus(9)))
       .rejects.toThrow(/already closed/);
 
     const row = await one<{ appeared_to: string }>(
       `SELECT appeared_to::text FROM advertising_log WHERE id = $1`, [id]);
-    expect(row.appeared_to, 'the first answer stands').toBe('2026-03-15');
+    expect(row.appeared_to, 'the first answer stands').toBe(CAME_DOWN);
   });
 
   it('audits nothing when the withdrawal is refused', async () => {
     const id = await recordAdvertisement(TEST_CTX, newAd({ appearedTo: null }));
-    await withdrawAdvertisement(TEST_CTX, id, '2026-03-15');
+    await withdrawAdvertisement(TEST_CTX, id, CAME_DOWN);
     const audits = await count(
       `SELECT count(*)::text AS n FROM audit_log WHERE entity_id = $1`, [id]);
 
-    await expect(withdrawAdvertisement(TEST_CTX, id, '2026-04-01')).rejects.toThrow();
+    await expect(withdrawAdvertisement(TEST_CTX, id, adFromPlus(9))).rejects.toThrow();
     expect(await count(
       `SELECT count(*)::text AS n FROM audit_log WHERE entity_id = $1`, [id])).toBe(audits);
   });
@@ -226,11 +283,11 @@ describe('withdrawing one', () => {
 
 describe('corrections', () => {
   it('supersedes the original, which stays exactly as it was', async () => {
-    const id = await recordAdvertisement(TEST_CTX, newAd({ appearedFrom: '2026-02-01' }));
+    const id = await recordAdvertisement(TEST_CTX, newAd());
     const fixId = await correctEntry(TEST_CTX, {
       entryId: id,
-      appearedFrom: '2026-02-03',
-      appearedTo: '2026-02-28',
+      appearedFrom: adFromPlus(2),
+      appearedTo: AD_TO,
       reference: null,
       carriedName: 'CCN',
       carriedContact: '(310) 555-0147',
@@ -239,12 +296,12 @@ describe('corrections', () => {
 
     const original = await one<{ appeared_from: string }>(
       `SELECT appeared_from::text FROM advertising_log WHERE id = $1`, [id]);
-    expect(original.appeared_from).toBe('2026-02-01');
+    expect(original.appeared_from).toBe(AD_FROM);
 
     const fix = await one<{ appeared_from: string; corrects_id: string; publication: string }>(
       `SELECT appeared_from::text, corrects_id, publication FROM advertising_log WHERE id = $1`,
       [fixId]);
-    expect(fix.appeared_from).toBe('2026-02-03');
+    expect(fix.appeared_from).toBe(adFromPlus(2));
     expect(fix.corrects_id).toBe(id);
 
     const state = await record(TEST_CTX);
@@ -259,8 +316,8 @@ describe('corrections', () => {
 
     const fixId = await correctEntry(TEST_CTX, {
       entryId: id,
-      appearedFrom: '2026-02-02',
-      appearedTo: '2026-02-28',
+      appearedFrom: adFromPlus(1),
+      appearedTo: AD_TO,
       reference: 'a corrected reference',
       carriedName: 'CCN',
       carriedContact: '(310) 555-0147',
@@ -277,8 +334,8 @@ describe('corrections', () => {
     const id = await recordAdvertisement(TEST_CTX, newAd());
     await expect(correctEntry(TEST_CTX, {
       entryId: id,
-      appearedFrom: '2026-02-02',
-      appearedTo: '2026-02-28',
+      appearedFrom: adFromPlus(1),
+      appearedTo: AD_TO,
       reference: null,
       carriedName: 'CCN',
       carriedContact: '(310) 555-0147',
@@ -290,8 +347,8 @@ describe('corrections', () => {
     const id = await recordAdvertisement(TEST_CTX, newAd());
     await expect(correctEntry(TEST_CTX, {
       entryId: id,
-      appearedFrom: '2026-02-01',
-      appearedTo: '2026-02-28',
+      appearedFrom: AD_FROM,
+      appearedTo: AD_TO,
       reference: null,
       carriedName: 'PENDING_LEGAL_NAME',
       carriedContact: '(310) 555-0147',
@@ -312,9 +369,21 @@ describe('corrections', () => {
      * accounting for them.
      */
     const before = await record(TEST_CTX);
-    const gap = before.coverage.stretches[0];
+    /*
+     * The WIDEST stretch, not the first. `stretches` is chronological, so `[0]` was a
+     * second positional assumption sitting on top of the pinned dates above: it happens
+     * to be the seed's hole only while nothing else in the trailing year is uncovered,
+     * and it would have silently become a one-day sliver at the window's start rather
+     * than failing honestly.
+     */
+    const gap = [...before.coverage.stretches].sort((a, b) => b.days - a.days)[0];
     expect(gap, 'the seed is meant to leave a gap to work with').toBeDefined();
-    expect(gap!.days).toBeGreaterThan(2);
+    expect(
+      gap!.days,
+      'the widest hole in the trailing year is too narrow to correct inside. The seed '
+      + "leaves nine days; if that has shrunk, something in this file's own fixtures is "
+      + 'covering it — see the comment on AD_FROM.',
+    ).toBeGreaterThan(2);
 
     const id = await recordAdvertisement(TEST_CTX, newAd({
       publication: `gapfill-${Date.now()}.example`,

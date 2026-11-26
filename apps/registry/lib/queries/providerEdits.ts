@@ -131,12 +131,33 @@ export const AVAILABILITY_BLOCKS: readonly string[] = SHIFT_DAYS
  * them. Recording the split in the audit diff is the only way the log can answer, later,
  * whether a stated fact was stated by the person it is about.
  */
-const REGISTRY_CONFIRMED = ['type', 'transports', 'areas'] as const;
+export const REGISTRY_CONFIRMED = ['type', 'transports', 'areas'] as const;
 
-const PROVIDER_STATED = [
+export const PROVIDER_STATED = [
   'availability', 'languages', 'specialties', 'restrictions', 'preferred_name',
   'phone', 'email', 'max_travel_min',
 ] as const;
+
+/**
+ * Every column this module is allowed to move, as one list derived from the two above.
+ *
+ * Exported, and the UPDATE below is the only statement that writes any of them, so the
+ * allow-list can be asserted as a RULE rather than as today's eleven column names: a
+ * test can read this list, write every column in it, and then require that no other
+ * column on the row moved — enumerating the others from `information_schema` rather
+ * than from a second copy of the list. A column added to the UPDATE without being added
+ * here fails that test on the column it forgot, and a column added to `providers` by a
+ * later migration is protected by it without anything in the test changing.
+ *
+ * It is also what makes the audit diff's split total. `registryConfirmed` and
+ * `providerStated` are filters over `changed`, so a written column on neither list is
+ * recorded as written and attributed to nobody — the one question the split exists to
+ * answer. Asserting the union is exactly this list is how the next column inherits the
+ * attribution instead of needing the same fix again.
+ */
+export const EDITABLE_COLUMNS: readonly string[] = [
+  ...REGISTRY_CONFIRMED, ...PROVIDER_STATED,
+];
 
 export interface ProviderFactsInput {
   type: ProviderType;

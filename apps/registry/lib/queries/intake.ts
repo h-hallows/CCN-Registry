@@ -217,16 +217,44 @@ export async function convertInquiry(
   return handle.transaction(async (tx) => {
     const inquiry = await lockUnhandled(tx, input.inquiryId);
 
+    /*
+     * `households.source` IS NOT WRITTEN HERE, AND THE OMISSION IS THE FIX.
+     *
+     * It used to be given `inquiry.source_path ?? 'enquiry'`. `inquiries.source_path`
+     * is "which page it came from" — the migration that added it says so in a comment —
+     * and `households.source` is the channel a family came through, written in words by
+     * whoever spoke to them: "Word of mouth", "Discharge planner referral", "VA social
+     * worker". The case screen prints it under one heading, so a converted household read
+     * "/refer" in the column beside "Word of mouth" on the household above it. The row
+     * was internally consistent and answered a different question than the screen asked
+     * of it, which is this project's recurring shape.
+     *
+     * STOP WRITING THE WRONG ONE, rather than write a right one or add a second column.
+     * Nothing is lost by not copying it: the page is already recorded once, durably, on
+     * the enquiry row — which is never edited and is joined to this household by
+     * `inquiries.household_id` — and the timeline entry below names it in the case's own
+     * narrative. The two facts were already separate; conversion was collapsing them.
+     *
+     * The channel is NOT derived here either, because this transaction does not know it.
+     * `/refer` cannot tell a discharge planner from an attorney, and guessing one from
+     * the partner key would put a second copy of an attribution in a text column, which
+     * is the defect one layer up. It stays null until somebody records it — "not
+     * recorded" is true, and a tidy wrong answer is not.
+     *
+     * THE BETTER FIX IS NOT REACHABLE FROM HERE: asking the operator "how did they hear
+     * about us" on the conversion form, which is a `ConvertInput` field, a form field and
+     * a line in app/(app)/actions.ts. The action file is outside this change.
+     */
     const [household] = await tx.query<{ id: string }>(
       `INSERT INTO households
          (display_name, status, dm_name, dm_relationship, dm_phone, dm_email,
-          cr_name, cr_area, payment_method, source, partner_id)
-       VALUES ($1, 'inquiry', $2, $3, $4, $5, $6, $7, $8::payment_method, $9, $10)
+          cr_name, cr_area, payment_method, partner_id)
+       VALUES ($1, 'inquiry', $2, $3, $4, $5, $6, $7, $8::payment_method, $9)
        RETURNING id`,
       [
         displayName, dmName, blank(input.dmRelationship), blank(input.dmPhone),
         blank(input.dmEmail), blank(input.crName), crArea, input.paymentMethod,
-        inquiry.source_path ?? 'enquiry', inquiry.partner_id,
+        inquiry.partner_id,
       ],
     );
     if (!household) throw new IntakeError('Could not create the household.');
@@ -264,6 +292,13 @@ export async function convertInquiry(
         + (inquiry.message ? ` They wrote: ${inquiry.message}` : ''),
     });
 
+    /*
+     * `sourcePath` is keyed by what it is — a page — and not as `source`, which the seed
+     * uses for the channel label. `bySource` reads both keys and now says which of the
+     * two each row of its breakdown was grouped from, because one is a channel somebody
+     * recorded and the other is a page a form was served at, and a table that prints
+     * them in one column under one heading invites them to be added up.
+     */
     await emit('inquiry_received',
       { caseId: kase.id },
       { inquiryId: input.inquiryId, sourcePath: inquiry.source_path, converted: true },
